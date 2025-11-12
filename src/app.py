@@ -7,18 +7,25 @@ import os
 from pathlib import Path
 from typing import Dict
 
-from flask import Flask, redirect, render_template, request, session, url_for, flash
+from flask import Flask, redirect, render_template, request, session, url_for, flash, g 
 import sqlite3
 import time
 import uuid
-
-# from . import observability
 
 from .dao import SalesRepo, ProductRepo, get_connection
 from .payment import process as payment_process
 from .main import init_db
 from .adapters.registry import get_adapter
 from .partners.partner_ingest_service import validate_products, upsert_products
+
+# Import observability components
+try:
+    from .observability.structured_logger import app_logger, log_request
+    from .observability.metrics_collector import metrics_collector, track_request_duration
+    OBSERVABILITY_ENABLED = True
+except ImportError:
+    OBSERVABILITY_ENABLED = False
+    print("Warning: Observability modules not found. Running without observability.")
 
 
 def create_app() -> Flask:
@@ -27,15 +34,22 @@ def create_app() -> Flask:
 
     from .flash_sales.routes import flash_bp
     app.register_blueprint(flash_bp)
+    
     # Register partners blueprint (ingest, diagnostics, integrability)
     try:
         from .partners.routes import bp as partners_bp
         app.register_blueprint(partners_bp)
     except Exception as e:
-        # If partners blueprint can't be imported, log the exception so missing
-        # dependencies or syntax errors are visible in the startup logs, then
-        # continue to allow the rest of the app to start for tests.
         app.logger.exception("Failed to import/register partners blueprint; admin routes unavailable")
+
+    # Register monitoring blueprint for observability
+    if OBSERVABILITY_ENABLED:
+        try:
+            from .monitoring_routes import monitoring_bp
+            app.register_blueprint(monitoring_bp)
+            app.logger.info("Monitoring dashboard registered at /monitoring/dashboard")
+        except Exception as e:
+            app.logger.exception("Failed to register monitoring blueprint")
 
     root = Path(__file__).resolve().parents[1]
     db_path = os.environ.get("APP_DB_PATH", str(root / "app.sqlite"))
@@ -54,47 +68,113 @@ def create_app() -> Flask:
         db_path = os.environ.get("APP_DB_PATH", str(root / "app.sqlite"))
         start_worker(db_path)
     except Exception:
-        # best-effort: don't fail app startup if worker can't be started
         pass
+
+    # ============================================
+    # OBSERVABILITY MIDDLEWARE
+    # ============================================
+    
+    @app.before_request
+    def before_request_observability():
+        """Initialize request tracking for observability"""
+        # Generate unique request ID
+        g.request_id = request.headers.get('X-Request-Id') or str(uuid.uuid4())
+        g.start_time = time.time()
+        
+        if OBSERVABILITY_ENABLED:
+            app_logger.info(
+                f"Request started: {request.method} {request.path}",
+                method=request.method,
+                path=request.path,
+                remote_addr=request.remote_addr
+            )
+    
+    @app.after_request
+    def after_request_observability(response):
+        """Record metrics after each request"""
+        if OBSERVABILITY_ENABLED and hasattr(g, 'start_time'):
+            try:
+                duration = time.time() - g.start_time
+                
+                # Record response time
+                metrics_collector.observe(
+                    'http_request_duration_seconds',
+                    duration,
+                    labels={
+                        'endpoint': request.endpoint or 'unknown',
+                        'method': request.method,
+                        'status': response.status_code
+                    }
+                )
+                
+                # Log completion
+                app_logger.info(
+                    f"Request completed: {request.method} {request.path}",
+                    status_code=response.status_code,
+                    duration_ms=round(duration * 1000, 2)
+                )
+                
+                # Track HTTP errors
+                if response.status_code >= 400:
+                    if 400 <= response.status_code < 500:
+                        metrics_collector.increment_counter('http_errors', labels={'type': '4xx'})
+                    elif 500 <= response.status_code < 600:
+                        metrics_collector.increment_counter('http_errors', labels={'type': '5xx'})
+                        
+            except Exception as e:
+                app.logger.error(f"Error in observability middleware: {e}")
+        
+        return response
+    
+    @app.errorhandler(404)
+    def not_found_error(error):
+        """Handle 404 errors with observability"""
+        if OBSERVABILITY_ENABLED:
+            metrics_collector.increment_counter('http_errors', labels={'type': '4xx'})
+            app_logger.warning(f"404 Not Found: {request.path}")
+        return render_template('404.html'), 404
+    
+    @app.errorhandler(500)
+    def internal_error(error):
+        """Handle 500 errors with observability"""
+        if OBSERVABILITY_ENABLED:
+            metrics_collector.increment_counter('http_errors', labels={'type': '5xx'})
+            app_logger.error(f"500 Internal Server Error", error=str(error))
+        return render_template('500.html'), 500
+    
+    @app.errorhandler(429)
+    def rate_limit_error(error):
+        """Handle rate limit errors"""
+        if OBSERVABILITY_ENABLED:
+            metrics_collector.increment_counter('errors_total', labels={'type': 'rate_limit'})
+            app_logger.warning("Rate limit exceeded", ip=request.remote_addr)
+        return {'error': 'Rate limit exceeded. Please try again later.'}, 429
+
+    # ============================================
+    # ROUTES
+    # ============================================
 
     @app.route("/")
     def index():
+        """Home page - redirect to login if not logged in, otherwise to products"""
+        if "user_id" in session:
+            return redirect(url_for("products"))
         return redirect(url_for("login"))
 
-    # Configure structured logging for the app
-    try:
-        observability.configure_logging()
-    except Exception:
-        pass
-
-    @app.before_request
-    def _start_timer():
-        request._start_time = time.time()
-        request.request_id = request.headers.get('X-Request-Id') or str(uuid.uuid4())
-
-    @app.after_request
-    def _record_metrics(response):
-        try:
-            path = request.path
-            elapsed = time.time() - getattr(request, '_start_time', time.time())
-            observability.HTTP_REQUESTS.labels(request.method, path, str(response.status_code)).inc()
-            observability.HTTP_LATENCY.labels(path).observe(elapsed)
-        except Exception:
-            pass
-        return response
-
-    @app.get('/metrics')
-    def metrics():
-        # Require session-based admin access to view process metrics
-        try:
-            if not session.get('is_admin'):
-                return ("Missing or invalid admin key", 401)
-            return observability.metrics_endpoint()
-        except Exception:
-            return ("metrics unavailable", 503)
+    @app.route("/health")
+    def health_check():
+        """Health check endpoint for Docker/monitoring"""
+        return {
+            'status': 'healthy',
+            'timestamp': time.time(),
+            'version': '1.0.0'
+        }, 200
 
     @app.route("/products")
     def products():
+        if "user_id" not in session:
+            flash("Please login to access products", "error")
+            return redirect(url_for("login"))
         q = request.args.get("q", "").strip()
         conn = get_conn()
         try:
@@ -123,7 +203,6 @@ def create_app() -> Flask:
             flash("Quantity must be > 0", "error")
             return redirect(url_for("products"))
         
-        # Check if product exists and is active
         conn = get_conn()
         try:
             repo = AProductRepo(conn)
@@ -133,15 +212,23 @@ def create_app() -> Flask:
                 flash(f"Product ID {pid} not found", "error")
                 return redirect(url_for("products"))
             
-            # Check if sufficient stock
             if not repo.check_stock(pid, qty):
                 flash(f"Only {product['stock']} in stock for {product['name']}", "error")
                 return redirect(url_for("products"))
             
-            # Add to cart if everything is valid
             cart = session.get("cart", {})
             cart[str(pid)] = cart.get(str(pid), 0) + qty
             session["cart"] = cart
+            
+            if OBSERVABILITY_ENABLED:
+                app_logger.info(
+                    "Item added to cart",
+                    product_id=pid,
+                    product_name=product['name'],
+                    quantity=qty,
+                    user_id=session.get('user_id')
+                )
+            
             flash(f"Added {qty} x {product['name']} to cart", "info")
             return redirect(url_for("cart_view"))
             
@@ -158,10 +245,10 @@ def create_app() -> Flask:
         items = []
         total = 0
         try:
-            repo = AProductRepo(conn)  # Use your repo instead of raw SQL
+            repo = AProductRepo(conn)
             for pid_str, qty in cart.items():
                 pid = int(pid_str)
-                prod = repo.get_product(pid)  # This returns flash price if active!
+                prod = repo.get_product(pid)
                 
                 if not prod:
                     continue
@@ -187,6 +274,18 @@ def create_app() -> Flask:
         flash("Cart cleared", "info")
         return redirect(url_for("products"))
 
+    @app.post("/cart/remove")
+    def cart_remove():
+        pid = request.form.get("product_id")
+        cart = session.get("cart", {})
+        
+        if pid in cart:
+            del cart[pid]
+            session["cart"] = cart
+            flash("Item removed from cart", "info")
+        
+        return redirect(url_for("cart_view"))
+
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
@@ -204,14 +303,24 @@ def create_app() -> Flask:
                     try:
                         ok = check_password_hash(user["password"], password)
                     except ValueError as e:
-                        # Handle unsupported hash types (e.g., scrypt) gracefully
                         flash("Your account uses an unsupported password hash. Please reset your password or contact support.", "error")
                         ok = False
                     if ok:
                         session["user_id"] = user["id"]
                         session["username"] = user["username"]
+                        
+                        if OBSERVABILITY_ENABLED:
+                            app_logger.info(
+                                "User logged in",
+                                user_id=user["id"],
+                                username=username
+                            )
+                        
                         flash("Login successful!", "success")
                         return redirect(url_for("products"))
+                
+                if OBSERVABILITY_ENABLED:
+                    app_logger.warning("Failed login attempt", username=username)
                 
                 flash("Invalid username or password", "error")
             finally:
@@ -221,6 +330,11 @@ def create_app() -> Flask:
 
     @app.route("/logout")
     def logout():
+        user_id = session.get('user_id')
+        
+        if OBSERVABILITY_ENABLED and user_id:
+            app_logger.info("User logged out", user_id=user_id)
+        
         session.clear()
         flash("You have been logged out", "info")
         return redirect(url_for("login"))
@@ -234,27 +348,27 @@ def create_app() -> Flask:
             
             conn = get_conn()
             try:
-                # Check if username exists
                 existing = conn.execute("SELECT id FROM user WHERE username = ?", (username,)).fetchone()
                 if existing:
                     flash("Username already exists", "error")
                 else:
-                    # Create user with PBKDF2 for compatibility across environments
                     hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
                     conn.execute(
                         "INSERT INTO user (name, username, password) VALUES (?, ?, ?)",
                         (name, username, hashed_password)
                     )
                     conn.commit()
+                    
+                    if OBSERVABILITY_ENABLED:
+                        app_logger.info("New user registered", username=username)
+                    
                     flash("Registration successful! Please login.", "success")
                     return redirect(url_for("login"))
             finally:
                 conn.close()
         
-        # Return register template (you'd need to create this)
         return render_template("register.html")
 
-    # Add login requirement to protected routes
     def login_required(f):
         from functools import wraps
         @wraps(f)
@@ -264,23 +378,49 @@ def create_app() -> Flask:
                 return redirect(url_for("login"))
             return f(*args, **kwargs)
         return decorated_function
+
     @app.post("/checkout")
     def checkout():
+        """Checkout with observability tracking"""
         pay_method = request.form.get("payment_method", "CARD")
-        user_id = session["user_id"]
+        user_id = session.get("user_id")
         cart: Dict[str, int] = session.get("cart", {})
         cart_list = [(int(pid), qty) for pid, qty in cart.items()]
+        
+        if not user_id:
+            flash("Please login to checkout", "error")
+            return redirect(url_for("login"))
+        
+        if not cart_list:
+            flash("Cart is empty", "error")
+            return redirect(url_for("cart_view"))
 
         conn = get_conn()
         repo = get_repo(conn)
+        
         try:
-            # Use the resilient payment path (retry + circuit breaker)
-            # Import lazily to avoid circular import issues
+            # Calculate total for metrics
+            total_cents = 0
+            for pid, qty in cart_list:
+                prod = conn.execute("SELECT price_cents FROM product WHERE id = ?", (pid,)).fetchone()
+                if prod:
+                    total_cents += prod[0] * qty
+            
+            if OBSERVABILITY_ENABLED:
+                app_logger.info(
+                    "Checkout started",
+                    user_id=user_id,
+                    cart_items=len(cart_list),
+                    total_cents=total_cents,
+                    payment_method=pay_method
+                )
+                metrics_collector.record_event('orders_total')
+            
+            # Use resilient payment with circuit breaker
             try:
                 from .flash_sales.payment_resilience import process_payment_resilient
                 payment_cb = process_payment_resilient
             except Exception:
-                # Fallback to the simple payment processor if resilience module unavailable
                 payment_cb = payment_process
 
             sale_id = repo.checkout_transaction(
@@ -289,23 +429,46 @@ def create_app() -> Flask:
                 pay_method=pay_method,
                 payment_cb=payment_cb,
             )
+            
+            # Success metrics
+            if OBSERVABILITY_ENABLED:
+                metrics_collector.increment_counter('orders_total')
+                metrics_collector.increment_counter('orders_total', labels={'status': 'success'})
+                app_logger.info(
+                    "Checkout completed successfully",
+                    sale_id=sale_id,
+                    user_id=user_id,
+                    total_cents=total_cents
+                )
+            
+            session.pop("cart", None)
+            flash(f"Checkout success. Sale #{sale_id}", "success")
+            return redirect(url_for("receipt", sale_id=sale_id))
+            
         except Exception as e:
+            # Error metrics
+            if OBSERVABILITY_ENABLED:
+                metrics_collector.increment_counter('orders_total')
+                metrics_collector.increment_counter('orders_total', labels={'status': 'failed'})
+                metrics_collector.increment_counter('errors_total', labels={'type': 'checkout'})
+                app_logger.error(
+                    "Checkout failed",
+                    user_id=user_id,
+                    error=str(e),
+                    exception_type=type(e).__name__
+                )
+            
             flash(str(e), "error")
             return redirect(url_for("cart_view"))
         finally:
             conn.close()
 
-        session.pop("cart", None)
-        flash(f"Checkout success. Sale #{sale_id}", "success")
-        return redirect(url_for("receipt", sale_id=sale_id))
-    
     @app.post('/partner/ingest')
     def partner_ingest_main():
         api_key = request.headers.get('X-API-Key') or request.form.get('api_key')
         if not api_key:
             return ("Missing API key", 401)
 
-        # validate key against DB
         conn_check = get_conn()
         try:
             cur = conn_check.execute('SELECT partner_id FROM partner_api_keys WHERE api_key = ?', (api_key,))
@@ -344,20 +507,6 @@ def create_app() -> Flask:
                 conn.close()
 
         return ({'ingested': ingested, 'errors': errors}, 200)
-    @app.post("/cart/remove")
-    def cart_remove():
-        pid = request.form.get("product_id")
-        cart = session.get("cart", {})
-        
-        if pid in cart:
-            del cart[pid]
-            session["cart"] = cart
-            flash("Item removed from cart", "info")
-        
-        return redirect(url_for("cart_view"))
-
-
-    
 
     @app.get("/receipt/<int:sale_id>")
     def receipt(sale_id: int):
@@ -380,7 +529,6 @@ def create_app() -> Flask:
         finally:
             conn.close()
         return render_template("receipt.html", sale=sale, items=items, payment=payment)
-
 
     @app.get("/admin/flash-sale")
     def admin_flash_sale():
@@ -413,6 +561,14 @@ def create_app() -> Flask:
                 WHERE id = ?
             """, (flash_price_cents, product_id))
             conn.commit()
+            
+            if OBSERVABILITY_ENABLED:
+                app_logger.info(
+                    "Flash sale activated",
+                    product_id=product_id,
+                    flash_price_cents=flash_price_cents
+                )
+            
             flash("Flash sale activated!", "success")
         finally:
             conn.close()
@@ -432,6 +588,10 @@ def create_app() -> Flask:
                 WHERE id = ?
             """, (product_id,))
             conn.commit()
+            
+            if OBSERVABILITY_ENABLED:
+                app_logger.info("Flash sale removed", product_id=product_id)
+            
             flash("Flash sale removed", "info")
         finally:
             conn.close()

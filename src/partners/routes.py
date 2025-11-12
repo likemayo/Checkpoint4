@@ -102,8 +102,17 @@ def get_conn():
     return sqlite3.connect(str(db_path))
 
 
-@bp.get("/")
-def index():
+@bp.get("/partner")
+@bp.get("/partner/")
+def partner_home():
+    """Landing page for partner uploads."""
+    return render_template("partners/partner_upload.html")
+
+
+@bp.get("/partner/upload")
+@bp.get("/partner/upload/")
+def partner_upload():
+    """Explicit upload page route (legacy-friendly)."""
     return render_template("partners/partner_upload.html")
 
 

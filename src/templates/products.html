@@ -26,6 +26,11 @@
   </head>
   <body>
     <h1>Products</h1>
+    <div style="margin-bottom: 10px;">
+      <a href="{{ url_for('monitoring.dashboard') }}">📊 View Monitoring Dashboard</a>
+      |
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
     <form method="get" action="/products" style="margin: 10px 0;">
       <input type="text" name="q" placeholder="Search products by name" value="{{ q or '' }}">
       <button type="submit">Search</button>
