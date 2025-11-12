@@ -27,7 +27,11 @@ class StructuredLogger:
         handler.setFormatter(JsonFormatter())
         self.logger.addHandler(handler)
         
-        # Also add file handler
+        # Also add file handler (create directory if it doesn't exist)
+        import os
+        log_dir = 'logs'
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
         file_handler = logging.FileHandler('logs/app.log')
         file_handler.setFormatter(JsonFormatter())
         self.logger.addHandler(file_handler)

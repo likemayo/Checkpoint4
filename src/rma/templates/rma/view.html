@@ -92,10 +92,17 @@
         <p>Our team is currently inspecting your returned items.</p>
     </div>
     {% elif rma.status == 'COMPLETED' %}
-    <div class="alert alert-success">
-        <strong>Return Completed</strong>
-        <p>Your return has been processed successfully.</p>
-    </div>
+        {% if rma.disposition == 'REJECT' %}
+        <div class="alert alert-danger">
+            <strong>Return Rejected</strong>
+            <p>{{ rma.resolution_notes or 'Your return request was rejected. Please contact customer service for more information.' }}</p>
+        </div>
+        {% else %}
+        <div class="alert alert-success">
+            <strong>Return Completed</strong>
+            <p>Your return has been processed successfully.</p>
+        </div>
+        {% endif %}
     {% endif %}
     
     <div class="section">

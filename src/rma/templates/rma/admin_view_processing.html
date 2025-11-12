@@ -47,6 +47,12 @@
             <a href="/rma/admin/process-refund/{{ rma.id }}">→ Process Refund</a>
             <p style="font-size:12px;color:#666;margin:8px 0 0;">Issue refund payment to customer.</p>
         </div>
+        {% elif rma.disposition == 'REJECT' %}
+        <div class="admin-actions">
+            <h3 style="margin-top:0;">Support Team Actions</h3>
+            <a href="/rma/admin/process-rejection/{{ rma.id }}">→ Complete Rejection</a>
+            <p style="font-size:12px;color:#666;margin:8px 0 0;">Finalize rejection decision and close RMA.</p>
+        </div>
         {% elif rma.disposition == 'REPLACEMENT' %}
         <div class="admin-actions">
             <h3 style="margin-top:0;">Fulfillment Team Actions</h3>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Process Rejection - RMA #{{ rma.rma_number }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #d32f2f;
+            margin-bottom: 10px;
+        }
+        .rma-info {
+            background: #ffebee;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+            border-left: 4px solid #d32f2f;
+        }
+        .rma-info div {
+            margin: 8px 0;
+        }
+        .rma-info label {
+            font-weight: bold;
+            display: inline-block;
+            width: 150px;
+        }
+        .items-section {
+            margin: 25px 0;
+        }
+        .items-section h3 {
+            color: #333;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        table th {
+            background: #f5f5f5;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+            border-bottom: 2px solid #ddd;
+        }
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .form-section {
+            margin: 25px 0;
+        }
+        .form-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #555;
+        }
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 100px;
+        }
+        .rejection-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .rejection-warning h4 {
+            color: #856404;
+            margin: 0 0 10px 0;
+        }
+        .rejection-warning ul {
+            margin: 10px 0 0 20px;
+            color: #856404;
+        }
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #eee;
+        }
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        .btn-primary {
+            background: #d32f2f;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #b71c1c;
+        }
+        .btn-secondary {
+            background: #757575;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #616161;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚫 Process Rejection</h1>
+        
+        <div class="rma-info">
+            <div><label>RMA Number:</label> {{ rma.rma_number }}</div>
+            <div><label>Order ID:</label> {{ rma.sale_id }}</div>
+            <div><label>Status:</label> {{ rma.status }}</div>
+            <div><label>Disposition:</label> <strong style="color: #d32f2f;">{{ rma.disposition }}</strong></div>
+            {% if rma.disposition_reason %}
+            <div><label>Rejection Reason:</label> {{ rma.disposition_reason }}</div>
+            {% endif %}
+        </div>
+
+        <div class="rejection-warning">
+            <h4>⚠️ Rejection Impact</h4>
+            <p>Processing this rejection will:</p>
+            <ul>
+                <li>Close this RMA request as <strong>COMPLETED</strong></li>
+                <li>Customer will <strong>NOT</strong> receive a refund</li>
+                <li>Customer keeps the returned item (no inventory change)</li>
+                <li>Customer will be notified of the rejection</li>
+            </ul>
+        </div>
+
+        <div class="items-section">
+            <h3>Returned Items</h3>
+            <table>
+                <tr>
+                    <th>Product</th>
+                    <th>Quantity</th>
+                    <th>Reason</th>
+                </tr>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.product_name }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>{{ item.reason }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <form method="POST" action="/rma/admin/{{ rma.id }}/process-rejection">
+            <div class="form-section">
+                <h3>Rejection Details</h3>
+                
+                <div class="form-group">
+                    <label for="notes">Additional Notes (Optional):</label>
+                    <textarea 
+                        id="notes" 
+                        name="notes" 
+                        placeholder="Add any additional notes about this rejection (e.g., reason for denial, next steps for customer)..."
+                    >{{ rma.disposition_reason or '' }}</textarea>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="btn btn-primary">
+                    ✓ Confirm Rejection & Close RMA
+                </button>
+                <a href="/rma/admin/processing-queue" class="btn btn-secondary">
+                    ← Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

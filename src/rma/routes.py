@@ -1288,6 +1288,72 @@ def admin_process_credit_submit(rma_id: int):
         return redirect(url_for("rma.admin_processing_queue"))
 
 
+@bp.route("/admin/process-rejection/<int:rma_id>", methods=["GET"])
+def admin_process_rejection_form(rma_id: int):
+    """Show form to process rejection."""
+    try:
+        conn = get_conn()
+        manager = RMAManager(conn)
+        rma = manager._get_rma(rma_id)
+        
+        if not rma:
+            flash("RMA not found", "error")
+            return redirect(url_for("rma.admin_processing_queue"))
+        
+        if rma["disposition"] != "REJECT":
+            flash("This RMA is not marked for rejection", "error")
+            return redirect(url_for("rma.admin_processing_queue"))
+        
+        # Get RMA items
+        items = conn.execute("""
+            SELECT ri.*, p.name as product_name
+            FROM rma_items ri
+            LEFT JOIN product p ON ri.product_id = p.id
+            WHERE ri.rma_id = ?
+        """, (rma_id,)).fetchall()
+        
+        conn.close()
+        return render_template("rma/process_rejection.html", rma=rma, items=items)
+        
+    except Exception as e:
+        flash(f"Error: {str(e)}", "error")
+        return redirect(url_for("rma.admin_processing_queue"))
+
+
+@bp.route("/admin/<int:rma_id>/process-rejection", methods=["POST"])
+def admin_process_rejection_submit(rma_id: int):
+    """Process rejection completion."""
+    try:
+        conn = get_conn()
+        manager = RMAManager(conn)
+        
+        rma = manager._get_rma(rma_id)
+        
+        # Validation
+        if rma["status"] not in ("DISPOSITION", "PROCESSING"):
+            flash(f"Cannot process rejection - already processed or invalid status", "error")
+            return redirect(url_for("rma.admin_processing_queue"))
+        
+        if rma["disposition"] != "REJECT":
+            flash(f"This RMA is not marked for rejection", "error")
+            return redirect(url_for("rma.admin_processing_queue"))
+        
+        # Get form data
+        notes = request.form.get("notes", "Return request rejected after review")
+        
+        # Process rejection
+        actor = session.get("username", "admin")
+        manager.process_rejection(rma_id, actor, notes)
+        
+        flash(f"Rejection has been processed successfully!", "success")
+        conn.close()
+        return redirect(url_for("rma.admin_completed_queue"))
+        
+    except Exception as e:
+        flash(f"Error processing rejection: {str(e)}", "error")
+        return redirect(url_for("rma.admin_processing_queue"))
+
+
 # =============================
 # Admin: Completed RMAs & Audit Log (Step 7)
 # =============================
@@ -1926,6 +1992,8 @@ def my_returns():
                     display_status = "REFUNDED"
                 elif r.get("disposition") == "STORE_CREDIT":
                     display_status = "CREDITED"
+                elif r.get("disposition") == "REJECT":
+                    display_status = "REJECTED"
             
             r["display_status"] = display_status
             rmas.append(r)
@@ -1989,6 +2057,8 @@ def view_rma(rma_number: str):
                 display_status = "REFUNDED"
             elif rma.get("disposition") == "STORE_CREDIT":
                 display_status = "CREDITED"
+            elif rma.get("disposition") == "REJECT":
+                display_status = "REJECTED"
         
         conn.close()
         
@@ -2050,6 +2120,8 @@ def view_rma_by_id(rma_id: int):
                 display_status = "REFUNDED"
             elif rma.get("disposition") == "STORE_CREDIT":
                 display_status = "CREDITED"
+            elif rma.get("disposition") == "REJECT":
+                display_status = "REJECTED"
         
         conn.close()
         return render_template(
