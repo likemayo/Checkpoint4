@@ -4,6 +4,14 @@ from enum import Enum
 from typing import Callable, Any
 from threading import Lock
 
+# Import observability with fallback
+try:
+    from src.observability.metrics_collector import metrics_collector
+    from src.observability.structured_logger import app_logger
+    OBSERVABILITY_ENABLED = True
+except ImportError:
+    OBSERVABILITY_ENABLED = False
+
 
 class CircuitState(Enum):
     CLOSED = "closed"  # Normal operation
@@ -16,13 +24,15 @@ class CircuitBreaker:
     
     def __init__(
         self,
-        failure_threshold: int = 5,
-        timeout_seconds: int = 60,
-        success_threshold: int = 2
+        failure_threshold: int = 3,  # Changed to 3 for demo (was 5)
+        timeout_seconds: int = 30,    # Changed to 30 for demo (was 60)
+        success_threshold: int = 2,
+        name: str = "default"         # NEW: Name for logging/metrics
     ):
         self.failure_threshold = failure_threshold
         self.timeout_seconds = timeout_seconds
         self.success_threshold = success_threshold
+        self.name = name  # NEW
         
         self.failure_count = 0
         self.success_count = 0
@@ -37,7 +47,33 @@ class CircuitBreaker:
                 if self._should_attempt_reset():
                     self.state = CircuitState.HALF_OPEN
                     self.success_count = 0
+                    
+                    # NEW: Log state transition
+                    if OBSERVABILITY_ENABLED:
+                        app_logger.info(
+                            f"Circuit breaker '{self.name}' moved to HALF_OPEN",
+                            circuit_name=self.name,
+                            state="HALF_OPEN",
+                            timeout_seconds=self.timeout_seconds
+                        )
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_state_changes',
+                            labels={'circuit': self.name, 'new_state': 'HALF_OPEN'}
+                        )
                 else:
+                    # NEW: Track fast-fail rejections
+                    if OBSERVABILITY_ENABLED:
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_rejections',
+                            labels={'circuit': self.name}
+                        )
+                        app_logger.warning(
+                            f"Circuit breaker '{self.name}' is OPEN - request rejected",
+                            circuit_name=self.name,
+                            state="OPEN",
+                            failure_count=self.failure_count
+                        )
+                    
                     raise CircuitBreakerOpenError("Circuit breaker is OPEN")
         
         try:
@@ -45,12 +81,13 @@ class CircuitBreaker:
             self._on_success()
             return result
         except Exception as e:
-            self._on_failure()
+            self._on_failure(e)
             raise e
     
     def _on_success(self):
         """Handle successful call"""
         with self.lock:
+            previous_state = self.state
             self.failure_count = 0
             
             if self.state == CircuitState.HALF_OPEN:
@@ -58,15 +95,66 @@ class CircuitBreaker:
                 if self.success_count >= self.success_threshold:
                     self.state = CircuitState.CLOSED
                     self.success_count = 0
+                    
+                    # NEW: Log recovery
+                    if OBSERVABILITY_ENABLED:
+                        app_logger.info(
+                            f"Circuit breaker '{self.name}' CLOSED - recovered",
+                            circuit_name=self.name,
+                            state="CLOSED",
+                            success_count=self.success_threshold
+                        )
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_state_changes',
+                            labels={'circuit': self.name, 'new_state': 'CLOSED'}
+                        )
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_recoveries',
+                            labels={'circuit': self.name}
+                        )
     
-    def _on_failure(self):
+    def _on_failure(self, exception: Exception = None):
         """Handle failed call"""
         with self.lock:
             self.failure_count += 1
             self.last_failure_time = datetime.now()
             
+            # NEW: Track each failure
+            if OBSERVABILITY_ENABLED:
+                metrics_collector.increment_counter(
+                    'circuit_breaker_failures',
+                    labels={'circuit': self.name}
+                )
+                app_logger.warning(
+                    f"Circuit breaker '{self.name}' failure",
+                    circuit_name=self.name,
+                    failure_count=self.failure_count,
+                    threshold=self.failure_threshold,
+                    error=str(exception) if exception else None
+                )
+            
             if self.failure_count >= self.failure_threshold:
+                previous_state = self.state
                 self.state = CircuitState.OPEN
+                
+                # NEW: Log circuit opening
+                if OBSERVABILITY_ENABLED:
+                    app_logger.error(
+                        f"Circuit breaker '{self.name}' OPENED",
+                        circuit_name=self.name,
+                        state="OPEN",
+                        failure_count=self.failure_count,
+                        threshold=self.failure_threshold,
+                        timeout_seconds=self.timeout_seconds
+                    )
+                    metrics_collector.increment_counter(
+                        'circuit_breaker_state_changes',
+                        labels={'circuit': self.name, 'new_state': 'OPEN'}
+                    )
+                    metrics_collector.increment_counter(
+                        'circuit_breaker_opens',
+                        labels={'circuit': self.name}
+                    )
     
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to try half-open"""
@@ -79,14 +167,40 @@ class CircuitBreaker:
     def reset(self):
         """Manually reset circuit breaker"""
         with self.lock:
+            previous_state = self.state
             self.state = CircuitState.CLOSED
             self.failure_count = 0
             self.success_count = 0
             self.last_failure_time = None
+            
+            # NEW: Log manual reset
+            if OBSERVABILITY_ENABLED:
+                app_logger.info(
+                    f"Circuit breaker '{self.name}' manually reset",
+                    circuit_name=self.name,
+                    previous_state=previous_state.value,
+                    new_state="CLOSED"
+                )
+                metrics_collector.increment_counter(
+                    'circuit_breaker_resets',
+                    labels={'circuit': self.name}
+                )
     
     def get_state(self) -> CircuitState:
         """Get current circuit state"""
         return self.state
+    
+    def get_metrics(self) -> dict:
+        """NEW: Get circuit breaker metrics for monitoring"""
+        return {
+            'name': self.name,
+            'state': self.state.value,
+            'failure_count': self.failure_count,
+            'success_count': self.success_count,
+            'failure_threshold': self.failure_threshold,
+            'timeout_seconds': self.timeout_seconds,
+            'last_failure_time': self.last_failure_time.isoformat() if self.last_failure_time else None
+        }
 
 
 class CircuitBreakerOpenError(Exception):
@@ -94,9 +208,9 @@ class CircuitBreakerOpenError(Exception):
     pass
 
 
-def circuit_breaker(failure_threshold=5, timeout_seconds=60):
+def circuit_breaker(failure_threshold=3, timeout_seconds=30, name="default"):
     """Decorator to apply circuit breaker to functions"""
-    breaker = CircuitBreaker(failure_threshold, timeout_seconds)
+    breaker = CircuitBreaker(failure_threshold, timeout_seconds, name=name)
     
     def decorator(f):
         @wraps(f)

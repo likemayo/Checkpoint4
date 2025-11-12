@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Monitoring Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .header {
+            background: #1e293b;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #60a5fa;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: #1e293b;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            border-left: 4px solid #3b82f6;
+            transition: transform 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .metric-card.success {
+            border-left-color: #10b981;
+        }
+
+        .metric-card.warning {
+            border-left-color: #f59e0b;
+        }
+
+        .metric-card.error {
+            border-left-color: #ef4444;
+        }
+
+        .metric-title {
+            color: #94a3b8;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 5px;
+        }
+
+        .metric-subtitle {
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .metric-change {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .metric-change.positive {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+
+        .metric-change.negative {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .section {
+            background: #1e293b;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .section-title {
+            font-size: 20px;
+            margin-bottom: 20px;
+            color: #60a5fa;
+        }
+
+        .log-entry {
+            background: #0f172a;
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            border-left: 3px solid #475569;
+        }
+
+        .log-entry.INFO {
+            border-left-color: #3b82f6;
+        }
+
+        .log-entry.WARNING {
+            border-left-color: #f59e0b;
+        }
+
+        .log-entry.ERROR {
+            border-left-color: #ef4444;
+        }
+
+        .log-timestamp {
+            color: #64748b;
+            margin-right: 10px;
+        }
+
+        .log-level {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        .log-level.INFO {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .log-level.WARNING {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+        }
+
+        .log-level.ERROR {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+        }
+
+        .refresh-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .refresh-indicator.show {
+            opacity: 1;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-badge.healthy {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .status-badge.degraded {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .logs-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .logs-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .logs-container::-webkit-scrollbar-track {
+            background: #0f172a;
+            border-radius: 4px;
+        }
+
+        .logs-container::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+
+        .logs-container::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 System Monitoring Dashboard</h1>
+        <p class="subtitle">Real-time metrics and logs | Auto-refresh every 5 seconds</p>
+        <div style="margin-top: 12px;">
+            <a href="{{ url_for('products') }}" style="
+                display: inline-block;
+                padding: 10px 16px;
+                background: #3b82f6;
+                color: white;
+                border-radius: 6px;
+                text-decoration: none;
+                font-weight: 600;
+            ">← Back to Products</a>
+        </div>
+    </div>
+
+    <div class="refresh-indicator" id="refreshIndicator">Updated</div>
+
+    <div class="dashboard-grid">
+        <div class="metric-card success">
+            <div class="metric-title">Total Orders</div>
+            <div class="metric-value" id="totalOrders">0</div>
+            <div class="metric-subtitle">
+                <span id="ordersPerMinute">0</span> orders/min
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">Successful Orders</div>
+            <div class="metric-value" id="successfulOrders">0</div>
+            <div class="metric-subtitle">
+                Success rate: <span id="successRate">0%</span>
+            </div>
+        </div>
+
+        <div class="metric-card warning">
+            <div class="metric-title">Total Refunds</div>
+            <div class="metric-value" id="totalRefunds">0</div>
+            <div class="metric-subtitle">
+                <span id="refundsPerDay">0</span> refunds/day
+            </div>
+        </div>
+
+        <div class="metric-card error">
+            <div class="metric-title">Total Errors</div>
+            <div class="metric-value" id="totalErrors">0</div>
+            <div class="metric-subtitle">
+                <span id="errorsPerMinute">0</span> errors/min
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">Avg Response Time</div>
+            <div class="metric-value" id="avgResponseTime">0<span style="font-size: 20px;">ms</span></div>
+            <div class="metric-subtitle">
+                P95: <span id="p95ResponseTime">0</span>ms | P99: <span id="p99ResponseTime">0</span>ms
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">System Status</div>
+            <div class="metric-value" style="font-size: 24px;">
+                <span class="status-badge healthy" id="systemStatus">Healthy</span>
+            </div>
+            <div class="metric-subtitle">
+                Uptime: <span id="uptime">0s</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">📊 Performance Breakdown</div>
+        <div class="dashboard-grid">
+            <div>
+                <strong style="color: #60a5fa;">Orders</strong>
+                <div style="margin-top: 10px; color: #cbd5e1; font-size: 14px;">
+                    <div>✓ Successful: <span id="successfulOrdersDetail">0</span></div>
+                    <div style="margin-top: 5px;">✗ Failed: <span id="failedOrders">0</span></div>
+                </div>
+            </div>
+            <div>
+                <strong style="color: #60a5fa;">Refunds</strong>
+                <div style="margin-top: 10px; color: #cbd5e1; font-size: 14px;">
+                    <div>✓ Approved: <span id="approvedRefunds">0</span></div>
+                    <div style="margin-top: 5px;">✗ Rejected: <span id="rejectedRefunds">0</span></div>
+                    <div style="margin-top: 5px;">⏳ Pending: <span id="pendingRefunds">0</span></div>
+                </div>
+            </div>
+            <div>
+                <strong style="color: #60a5fa;">Errors</strong>
+                <div style="margin-top: 10px; color: #cbd5e1; font-size: 14px;">
+                    <div>4xx Client: <span id="clientErrors">0</span></div>
+                    <div style="margin-top: 5px;">5xx Server: <span id="serverErrors">0</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">📋 Recent Logs</div>
+        <div class="logs-container" id="logsContainer">
+            <p style="color: #64748b;">Loading logs...</p>
+        </div>
+    </div>
+
+    <script>
+        // Format uptime in human-readable format
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        // Format numbers with commas
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        // Show refresh indicator
+        function showRefreshIndicator() {
+            const indicator = document.getElementById('refreshIndicator');
+            indicator.classList.add('show');
+            setTimeout(() => {
+                indicator.classList.remove('show');
+            }, 1000);
+        }
+
+        // Fetch and update metrics
+        async function updateMetrics() {
+            try {
+                const response = await fetch('/monitoring/api/metrics');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    const data = result.data;
+                    
+                    // Orders
+                    document.getElementById('totalOrders').textContent = formatNumber(data.orders.total);
+                    document.getElementById('successfulOrders').textContent = formatNumber(data.orders.successful);
+                    document.getElementById('failedOrders').textContent = formatNumber(data.orders.failed);
+                    document.getElementById('ordersPerMinute').textContent = data.orders.rate_per_minute.toFixed(2);
+                    document.getElementById('successfulOrdersDetail').textContent = formatNumber(data.orders.successful);
+                    
+                    // Success rate
+                    const successRate = data.orders.total > 0 
+                        ? ((data.orders.successful / data.orders.total) * 100).toFixed(1)
+                        : 0;
+                    document.getElementById('successRate').textContent = successRate + '%';
+                    
+                    // Refunds
+                    document.getElementById('totalRefunds').textContent = formatNumber(data.refunds.total);
+                    document.getElementById('refundsPerDay').textContent = data.refunds.rate_per_day.toFixed(2);
+                    document.getElementById('approvedRefunds').textContent = formatNumber(data.refunds.approved);
+                    document.getElementById('rejectedRefunds').textContent = formatNumber(data.refunds.rejected);
+                    document.getElementById('pendingRefunds').textContent = formatNumber(data.refunds.pending);
+                    
+                    // Errors
+                    document.getElementById('totalErrors').textContent = formatNumber(data.errors.total);
+                    document.getElementById('errorsPerMinute').textContent = data.errors.rate_per_minute.toFixed(2);
+                    document.getElementById('clientErrors').textContent = formatNumber(data.errors.by_type['4xx']);
+                    document.getElementById('serverErrors').textContent = formatNumber(data.errors.by_type['5xx']);
+                    
+                    // Performance
+                    document.getElementById('avgResponseTime').innerHTML = 
+                        data.performance.avg_response_time_ms.toFixed(0) + '<span style="font-size: 20px;">ms</span>';
+                    document.getElementById('p95ResponseTime').textContent = 
+                        data.performance.p95_response_time_ms.toFixed(0);
+                    document.getElementById('p99ResponseTime').textContent = 
+                        data.performance.p99_response_time_ms.toFixed(0);
+                    
+                    showRefreshIndicator();
+                }
+            } catch (error) {
+                console.error('Error fetching metrics:', error);
+            }
+        }
+
+        // Fetch and update logs
+        async function updateLogs() {
+            try {
+                const response = await fetch('/monitoring/api/logs/recent');
+                const result = await response.json();
+                
+                if (result.status === 'success' && result.logs.length > 0) {
+                    const logsContainer = document.getElementById('logsContainer');
+                    logsContainer.innerHTML = '';
+                    
+                    // Show latest 20 logs
+                    const logs = result.logs.slice(-20).reverse();
+                    
+                    logs.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.className = `log-entry ${log.level}`;
+                        
+                        const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                        
+                        logEntry.innerHTML = `
+                            <span class="log-timestamp">${timestamp}</span>
+                            <span class="log-level ${log.level}">${log.level}</span>
+                            <span>${log.message}</span>
+                        `;
+                        
+                        logsContainer.appendChild(logEntry);
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+            }
+        }
+
+        // Fetch and update system health
+        async function updateHealth() {
+            try {
+                const response = await fetch('/monitoring/api/health');
+                const data = await response.json();
+                
+                const statusBadge = document.getElementById('systemStatus');
+                statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                statusBadge.className = `status-badge ${data.status}`;
+                
+                document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
+            } catch (error) {
+                console.error('Error fetching health:', error);
+            }
+        }
+
+        // Update all data
+        function updateAll() {
+            updateMetrics();
+            updateLogs();
+            updateHealth();
+        }
+
+        // Initial load
+        updateAll();
+
+        // Auto-refresh every 5 seconds
+        setInterval(updateAll, 5000);
+    </script>
+</body>
+</html>
