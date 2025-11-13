@@ -18,6 +18,7 @@ def seed_users(conn):
         ("John Doe", "john", "password123"),
         ("Jane Smith", "jane", "password123"), 
         ("Alice Johnson", "alice", "password123"),
+        ("Admin: admin1", "admin1", "123"),  # Default admin account
     ]
     
     for name, username, password in users:
@@ -45,6 +46,7 @@ def seed_users(conn):
     
     conn.commit()
     print(f"Seeded users with authentication")
+    print("NOTE: Default admin account - username: admin1, password: 123")
 
 def seed_products(conn):
     """Insert demo products (price in cents)"""

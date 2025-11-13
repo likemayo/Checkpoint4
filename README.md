@@ -65,11 +65,17 @@ A comprehensive e-commerce platform featuring partner integration, flash sales, 
 The easiest way to run the entire system is with Docker Compose:
 
 ```bash
-# One-command startup
+# One-command startup (automatically seeds database on first run)
 docker-compose up
 ```
 
 The application will be available at **http://localhost:5000**
+
+**Default Login Credentials (automatically created):**
+- **Admin**: username: `admin1`, password: `123`
+- **Customer**: username: `john`, password: `password123`
+
+The database is automatically seeded with demo data on first startup.
 
 ### Docker Architecture
 
@@ -186,10 +192,20 @@ pip install -r requirements.txt
 # Create schema and run migrations
 python -m src.main
 
-# Seed demo data (optional)
+# Seed demo data (includes default admin account)
 python -m src.seed
 python -m db.seed_flash_sales
 ```
+
+**Default Credentials (after seeding):**
+- **Admin**: username: `admin1`, password: `123`
+- **Customer**: username: `john`, password: `password123`
+- **Customer**: username: `jane`, password: `password123`
+- **Customer**: username: `alice`, password: `password123`
+
+> ⚠️ **Important**: Each person running the app has their own local database. 
+> The database file is NOT shared between different laptops/machines.
+> Everyone must run `python -m src.seed` to create accounts on their own machine.
 
 4. **Set environment variables**
 ```bash
