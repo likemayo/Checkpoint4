@@ -841,7 +841,8 @@ def partner_requeue_failed():
 # runs; the main project registers the `bp` blueprint into the primary app.
 try:
     test_app = Flask(__name__, template_folder=Path(__file__).parent.joinpath("templates"))
-    test_app.register_blueprint(bp)
+    # In test context, mount blueprint at /partner so tests use /partner/* urls
+    test_app.register_blueprint(bp, url_prefix="/partner")
     app = test_app
 except Exception:
     # If Flask isn't available for some reason in the test environment,

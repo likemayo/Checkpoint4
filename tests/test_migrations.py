@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 import subprocess
 import os
+import sys
 
 
 def setup_db_from_init(db_path: str, repo_root: Path):
@@ -24,7 +25,8 @@ def test_migration_adds_strict_column(tmp_path: Path):
     env = os.environ.copy()
     env["APP_DB_PATH"] = str(db_file)
     runner = repo_root / "scripts" / "run_migrations.py"
-    subprocess.check_call(["python", str(runner)], env=env)
+    # Use sys.executable to get the current Python interpreter path
+    subprocess.check_call([sys.executable, str(runner)], env=env)
 
     # verify column exists
     conn = sqlite3.connect(str(db_file))

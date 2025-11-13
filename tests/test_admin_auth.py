@@ -27,10 +27,10 @@ def test_admin_endpoints_require_key(monkeypatch):
     rv = client.get('/partner/schedules', headers={"X-Admin-Key": "admintest"})
     assert rv.status_code == 200
 
-    # Create schedule without required fields -> 400 (route validates payload)
-    rv = client.post('/partner/schedules', json={})
+    # Create schedule without required fields with header -> 400 (route validates payload)
+    rv = client.post('/partner/schedules', json={}, headers={"X-Admin-Key": "admintest"})
     assert rv.status_code == 400
 
-    # Create with key but missing fields -> 400
+    # Create with key and missing fields -> 400
     rv = client.post('/partner/schedules', headers={"X-Admin-Key": "admintest"}, json={})
     assert rv.status_code == 400

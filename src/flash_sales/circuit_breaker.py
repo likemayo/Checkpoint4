@@ -50,39 +50,48 @@ class CircuitBreaker:
                     
                     # NEW: Log state transition
                     if OBSERVABILITY_ENABLED:
-                        app_logger.info(
-                            f"Circuit breaker '{self.name}' moved to HALF_OPEN",
-                            circuit_name=self.name,
-                            state="HALF_OPEN",
-                            timeout_seconds=self.timeout_seconds
-                        )
-                        metrics_collector.increment_counter(
-                            'circuit_breaker_state_changes',
-                            labels={'circuit': self.name, 'new_state': 'HALF_OPEN'}
-                        )
+                        try:
+                            app_logger.info(
+                                f"Circuit breaker '{self.name}' moved to HALF_OPEN",
+                                circuit_name=self.name,
+                                state="HALF_OPEN",
+                                timeout_seconds=self.timeout_seconds
+                            )
+                            metrics_collector.increment_counter(
+                                'circuit_breaker_state_changes',
+                                labels={'circuit': self.name, 'new_state': 'HALF_OPEN'}
+                            )
+                        except Exception:
+                            # Observability failed, continue anyway
+                            pass
                 else:
                     # NEW: Track fast-fail rejections
                     if OBSERVABILITY_ENABLED:
-                        metrics_collector.increment_counter(
-                            'circuit_breaker_rejections',
-                            labels={'circuit': self.name}
-                        )
-                        app_logger.warning(
-                            f"Circuit breaker '{self.name}' is OPEN - request rejected",
-                            circuit_name=self.name,
-                            state="OPEN",
-                            failure_count=self.failure_count
-                        )
+                        try:
+                            metrics_collector.increment_counter(
+                                'circuit_breaker_rejections',
+                                labels={'circuit': self.name}
+                            )
+                            app_logger.warning(
+                                f"Circuit breaker '{self.name}' is OPEN - request rejected",
+                                circuit_name=self.name,
+                                state="OPEN",
+                                failure_count=self.failure_count
+                            )
+                        except Exception:
+                            # Observability failed, continue anyway
+                            pass
                     
                     raise CircuitBreakerOpenError("Circuit breaker is OPEN")
         
+        # Execute function outside the lock
         try:
             result = func(*args, **kwargs)
             self._on_success()
             return result
         except Exception as e:
             self._on_failure(e)
-            raise e
+            raise
     
     def _on_success(self):
         """Handle successful call"""
@@ -98,20 +107,24 @@ class CircuitBreaker:
                     
                     # NEW: Log recovery
                     if OBSERVABILITY_ENABLED:
-                        app_logger.info(
-                            f"Circuit breaker '{self.name}' CLOSED - recovered",
-                            circuit_name=self.name,
-                            state="CLOSED",
-                            success_count=self.success_threshold
-                        )
-                        metrics_collector.increment_counter(
-                            'circuit_breaker_state_changes',
-                            labels={'circuit': self.name, 'new_state': 'CLOSED'}
-                        )
-                        metrics_collector.increment_counter(
-                            'circuit_breaker_recoveries',
-                            labels={'circuit': self.name}
-                        )
+                        try:
+                            app_logger.info(
+                                f"Circuit breaker '{self.name}' CLOSED - recovered",
+                                circuit_name=self.name,
+                                state="CLOSED",
+                                success_count=self.success_threshold
+                            )
+                            metrics_collector.increment_counter(
+                                'circuit_breaker_state_changes',
+                                labels={'circuit': self.name, 'new_state': 'CLOSED'}
+                            )
+                            metrics_collector.increment_counter(
+                                'circuit_breaker_recoveries',
+                                labels={'circuit': self.name}
+                            )
+                        except Exception:
+                            # Observability failed, continue anyway
+                            pass
     
     def _on_failure(self, exception: Exception = None):
         """Handle failed call"""
@@ -121,17 +134,21 @@ class CircuitBreaker:
             
             # NEW: Track each failure
             if OBSERVABILITY_ENABLED:
-                metrics_collector.increment_counter(
-                    'circuit_breaker_failures',
-                    labels={'circuit': self.name}
-                )
-                app_logger.warning(
-                    f"Circuit breaker '{self.name}' failure",
-                    circuit_name=self.name,
-                    failure_count=self.failure_count,
-                    threshold=self.failure_threshold,
-                    error=str(exception) if exception else None
-                )
+                try:
+                    metrics_collector.increment_counter(
+                        'circuit_breaker_failures',
+                        labels={'circuit': self.name}
+                    )
+                    app_logger.warning(
+                        f"Circuit breaker '{self.name}' failure",
+                        circuit_name=self.name,
+                        failure_count=self.failure_count,
+                        threshold=self.failure_threshold,
+                        error=str(exception) if exception else None
+                    )
+                except Exception:
+                    # Observability failed, continue anyway
+                    pass
             
             if self.failure_count >= self.failure_threshold:
                 previous_state = self.state
@@ -139,22 +156,26 @@ class CircuitBreaker:
                 
                 # NEW: Log circuit opening
                 if OBSERVABILITY_ENABLED:
-                    app_logger.error(
-                        f"Circuit breaker '{self.name}' OPENED",
-                        circuit_name=self.name,
-                        state="OPEN",
-                        failure_count=self.failure_count,
-                        threshold=self.failure_threshold,
-                        timeout_seconds=self.timeout_seconds
-                    )
-                    metrics_collector.increment_counter(
-                        'circuit_breaker_state_changes',
-                        labels={'circuit': self.name, 'new_state': 'OPEN'}
-                    )
-                    metrics_collector.increment_counter(
-                        'circuit_breaker_opens',
-                        labels={'circuit': self.name}
-                    )
+                    try:
+                        app_logger.error(
+                            f"Circuit breaker '{self.name}' OPENED",
+                            circuit_name=self.name,
+                            state="OPEN",
+                            failure_count=self.failure_count,
+                            threshold=self.failure_threshold,
+                            timeout_seconds=self.timeout_seconds
+                        )
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_state_changes',
+                            labels={'circuit': self.name, 'new_state': 'OPEN'}
+                        )
+                        metrics_collector.increment_counter(
+                            'circuit_breaker_opens',
+                            labels={'circuit': self.name}
+                        )
+                    except Exception:
+                        # Observability failed, continue anyway
+                        pass
     
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to try half-open"""
@@ -175,16 +196,20 @@ class CircuitBreaker:
             
             # NEW: Log manual reset
             if OBSERVABILITY_ENABLED:
-                app_logger.info(
-                    f"Circuit breaker '{self.name}' manually reset",
-                    circuit_name=self.name,
-                    previous_state=previous_state.value,
-                    new_state="CLOSED"
-                )
-                metrics_collector.increment_counter(
-                    'circuit_breaker_resets',
-                    labels={'circuit': self.name}
-                )
+                try:
+                    app_logger.info(
+                        f"Circuit breaker '{self.name}' manually reset",
+                        circuit_name=self.name,
+                        previous_state=previous_state.value,
+                        new_state="CLOSED"
+                    )
+                    metrics_collector.increment_counter(
+                        'circuit_breaker_resets',
+                        labels={'circuit': self.name}
+                    )
+                except Exception:
+                    # Observability failed, continue anyway
+                    pass
     
     def get_state(self) -> CircuitState:
         """Get current circuit state"""
