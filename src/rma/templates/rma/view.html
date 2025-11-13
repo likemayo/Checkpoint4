@@ -259,14 +259,14 @@
     <div class="section">
         <h2>Refund Details</h2>
         <div class="refund-box">
-            <div class="refund-amount">${{ "%.2f"|format(refund.amount) }}</div>
-            <p style="margin: 5px 0;">Refund Method: {{ refund.method }}</p>
-            <p style="margin: 5px 0;">Status: <strong>{{ refund.status }}</strong></p>
-            {% if refund.transaction_id %}
-            <p style="margin: 5px 0; font-size: 12px; color: #666;">Transaction ID: {{ refund.transaction_id }}</p>
+            <div class="refund-amount">${{ "%.2f"|format(refund['amount_cents'] / 100.0) }}</div>
+            <p style="margin: 5px 0;">Refund Method: {{ refund['method'] }}</p>
+            <p style="margin: 5px 0;">Status: <strong>{{ refund['status'] }}</strong></p>
+            {% if refund.get('transaction_id') %}
+            <p style="margin: 5px 0; font-size: 12px; color: #666;">Transaction ID: {{ refund['transaction_id'] }}</p>
             {% endif %}
-            {% if refund.refund_date %}
-            <p style="margin: 5px 0;">Processed: {{ refund.refund_date }}</p>
+            {% if refund.get('refund_date') or refund.get('created_at') %}
+            <p style="margin: 5px 0;">Processed: {{ refund.get('refund_date') or refund.get('created_at') }}</p>
             {% endif %}
         </div>
     </div>

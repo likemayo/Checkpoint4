@@ -970,20 +970,13 @@ def admin_replacement_form(rma_id: int):
             flash(f"RMA disposition must be REPLACEMENT. Current: {rma['disposition']}", "error")
             return redirect(url_for("rma.admin_view_processing_rma", rma_id=rma_id))
         
-        # Check if RMA is in correct status
-        # Only allow initiating repair once (from DISPOSITION)
-        if rma["status"] != "DISPOSITION":
+        # Check if RMA is in correct status (DISPOSITION or PROCESSING)
+        if rma["status"] not in ("DISPOSITION", "PROCESSING"):
             conn.close()
-            if rma["status"] == "PROCESSING":
-                flash("Repair already initiated for this RMA.", "error")
+            if rma["status"] == "COMPLETED":
+                flash("Replacement already processed for this RMA.", "error")
             else:
-                flash(f"RMA must be in DISPOSITION status. Current status: {rma['status']}", "error")
-            return redirect(url_for("rma.admin_view_processing_rma", rma_id=rma_id))
-        
-        # Check if replacement already processed
-        if rma["status"] == "COMPLETED":
-            conn.close()
-            flash("Replacement already processed for this RMA.", "error")
+                flash(f"RMA must be in DISPOSITION or PROCESSING status. Current status: {rma['status']}", "error")
             return redirect(url_for("rma.admin_view_processing_rma", rma_id=rma_id))
         
         conn.close()

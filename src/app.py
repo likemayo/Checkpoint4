@@ -188,11 +188,27 @@ def create_app() -> Flask:
             'version': '1.0.0'
         }, 200
 
-    @app.get("/admin")
+    @app.route("/admin")
     def admin_home():
         """General Admin Homepage linking RMA and Partner admin tools."""
-        # This landing page is visible without auth; individual sections enforce admin where needed
-        return render_template("admin_home.html")
+        # Get user info from session
+        user_id = session.get("user_id")
+        username = session.get("username", "Admin")
+        
+        # If user is logged in, fetch their current info from database
+        if user_id:
+            conn = get_conn()
+            try:
+                user = conn.execute(
+                    "SELECT username, name FROM user WHERE id = ?",
+                    (user_id,)
+                ).fetchone()
+                if user:
+                    username = user["username"]
+            finally:
+                conn.close()
+        
+        return render_template("admin_home.html", username=username)
 
     @app.route("/products")
     def products():
@@ -315,6 +331,7 @@ def create_app() -> Flask:
         if request.method == "POST":
             username = request.form["username"]
             password = request.form["password"]
+            selected_role = request.form.get("role", "customer")  # Get the selected role
             
             conn = get_conn()
             try:
@@ -330,11 +347,27 @@ def create_app() -> Flask:
                         flash("Your account uses an unsupported password hash. Please reset your password or contact support.", "error")
                         ok = False
                     if ok:
+                        # Check if this is an admin user (name starts with "Admin: ")
+                        is_admin_user = user["name"] and user["name"].startswith("Admin: ")
+                        
+                        # Validate that the selected role matches the user's actual role
+                        if selected_role == "admin" and not is_admin_user:
+                            flash("Invalid credentials for admin role", "error")
+                            if OBSERVABILITY_ENABLED:
+                                app_logger.warning("Failed admin login attempt - user is not admin", username=username)
+                            return render_template("login.html")
+                        
+                        if selected_role == "customer" and is_admin_user:
+                            flash("Admin accounts cannot login as customers. Please select Admin role.", "error")
+                            if OBSERVABILITY_ENABLED:
+                                app_logger.warning("Failed customer login attempt - user is admin", username=username)
+                            return render_template("login.html")
+                        
+                        # Set session data
                         session["user_id"] = user["id"]
                         session["username"] = user["username"]
                         
-                        # Check if this is an admin user (name starts with "Admin: ")
-                        if user["name"] and user["name"].startswith("Admin: "):
+                        if is_admin_user:
                             session["is_admin"] = True
                             flash("Admin login successful!", "success")
                             return redirect(url_for("admin_home"))
@@ -377,10 +410,16 @@ def create_app() -> Flask:
             return redirect(url_for("login"))
         
         user_id = session["user_id"]
-        username = session.get("username", "User")
         
         conn = get_conn()
         try:
+            # Fetch current username from database
+            user = conn.execute(
+                "SELECT username, name FROM user WHERE id = ?",
+                (user_id,)
+            ).fetchone()
+            username = user["username"] if user else session.get("username", "User")
+            
             # Get all user orders with items
             orders = conn.execute("""
                 SELECT s.id, s.sale_time as created_at, s.status, 
@@ -474,7 +513,13 @@ def create_app() -> Flask:
                         display_status = "REPLACED"
                     elif completed_rma["disposition"] == "STORE_CREDIT":
                         display_status = "CREDITED"
-                    # REFUND changes order status to REFUNDED, so no override needed
+                    elif completed_rma["disposition"] == "REFUND":
+                        display_status = "REFUNDED"
+                    elif completed_rma["disposition"] == "REJECT":
+                        display_status = "RETURN_REJECTED"
+                # If order status is already REFUNDED, keep it
+                elif order["status"] == "REFUNDED":
+                    display_status = "REFUNDED"
                 
                 orders_with_items.append({
                     "id": order["id"],

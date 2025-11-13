@@ -28,19 +28,19 @@
       {% endif %}
     {% endwith %}
     
-    <div class="role-selector">
-        <strong>Select Role:</strong>
-        <label>
-            <input type="radio" name="role" value="customer" checked onchange="updateLoginForm(this.value)">
-            Customer
-        </label>
-        <label>
-            <input type="radio" name="role" value="admin" onchange="updateLoginForm(this.value)">
-            Admin
-        </label>
-    </div>
-    
     <form method="post" action="/login" id="loginForm">
+        <div class="role-selector">
+            <strong>Select Role:</strong>
+            <label>
+                <input type="radio" name="role" value="customer" checked onchange="updateLoginForm(this.value)">
+                Customer
+            </label>
+            <label>
+                <input type="radio" name="role" value="admin" onchange="updateLoginForm(this.value)">
+                Admin
+            </label>
+        </div>
+        
         <div class="form-group">
             <label>Username:</label>
             <input type="text" name="username" id="usernameField" required>
