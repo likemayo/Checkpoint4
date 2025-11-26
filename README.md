@@ -1,24 +1,49 @@
-````markdown
-# E-Commerce Platform with Partner Catalog Ingest & RMA System
+# Checkpoint 4 — E-Commerce Platform
+## Partner Integration · Flash Sales · RMA System · Observability · Order Management
 
-A comprehensive e-commerce platform featuring partner integration, flash sales, and a complete Returns Merchandise Authorization (RMA) system. Built with Flask, SQLite, and Docker for easy deployment.
+A production-ready e-commerce platform featuring partner catalog integration, flash sales with resilience patterns, a complete Returns Merchandise Authorization (RMA) system, comprehensive observability, and enhanced order management. Built with Flask, SQLite, and Docker for easy deployment.
 
-## 🚀 Features
+---
+
+## 🚀 Quick Start (Docker — Recommended)
+
+```bash
+# One-command startup (automatically seeds database on first run)
+docker-compose up
+```
+
+**Application URL**: http://localhost:5000
+
+**Default Login Credentials** (automatically created):
+- **Admin**: `admin1` / `123`
+- **Customer**: `john` / `password123`
+
+The database is automatically seeded with demo data on first startup.
+
+---
+
+## 📋 Features
 
 ### Core E-Commerce
 - Product catalog with inventory management
 - Shopping cart and checkout
 - User authentication and dashboard
-- Order history and receipts
+- **Order history with filtering** (NEW — Checkpoint 4)
+  - Filter by status (pending, processing, completed, cancelled)
+  - Filter by date range
+  - Keyword search across order ID, product names, and customer info
 - Payment processing integration
+- Receipt generation
 
 ### Partner Integration
 - CSV/JSON feed ingestion from partners
 - Validation and normalization of partner data
 - Durable job queue with async processing
 - Admin dashboard for partner management
-- API key authentication and audit logging
+- API key authentication with audit logging
 - Scheduled feed imports
+- Machine-readable contract endpoint
+- Quickstart help endpoint with curl examples
 
 ### Flash Sales
 - Time-limited promotional events
@@ -27,14 +52,14 @@ A comprehensive e-commerce platform featuring partner integration, flash sales, 
 - Rate limiting and caching
 - Real-time inventory tracking
 
-### Returns & RMA System (NEW)
+### Returns & RMA System
 - **Customer Portal**:
   - Request returns with reason selection
   - Upload supporting images
   - Track return status in real-time
   - View return history
   
-- **Admin Workflow** (10-stage process):
+- **Admin Workflow** (10-stage lifecycle):
   1. **Submitted** → Customer submits return request
   2. **Validating** → Automated validation checks
   3. **Approved** → Admin approves return
@@ -46,7 +71,7 @@ A comprehensive e-commerce platform featuring partner integration, flash sales, 
   9. **Processing** → Financial/fulfillment processing
   10. **Completed** → RMA closed
 
-- **Disposition Types**:
+- **Disposition Options**:
   - **Refund**: Full or partial refund processing
   - **Replacement**: Create new order and ship replacement
   - **Repair**: Send item for repair
@@ -59,554 +84,352 @@ A comprehensive e-commerce platform featuring partner integration, flash sales, 
   - Inventory adjustment automation
   - Metrics and analytics dashboard
   - Image review for customer submissions
+  
+- **RMA Notifications** (NEW — Checkpoint 4):
+  - Real-time notification badge with unread count
+  - Auto-polling every 30 seconds
+  - Disposition-aware messages (different notifications for refund vs replacement)
+  - Notification center page with mark-as-read functionality
+  - Database-backed for persistence across sessions
 
-## 🐳 Docker Deployment (Recommended)
+### Low Stock Alerts (NEW — Checkpoint 4)
+- Configurable low-stock threshold (default: 5 units)
+- Admin dashboard display of products below threshold
+- Environment variable configuration: `LOW_STOCK_THRESHOLD`
+- Query parameter override for testing: `?low_stock_threshold=N`
+- REST API endpoint: `/api/low-stock`
+- Sorted by stock level (lowest first) for prioritization
 
-The easiest way to run the entire system is with Docker Compose:
+### Observability & Monitoring (Checkpoint 3)
+- **Structured Logging**:
+  - JSON-formatted logs with severity levels (DEBUG, INFO, WARNING, ERROR)
+  - Request/response logging with timing
+  - Business event tracking (orders, RMAs, partner ingests)
+  - Correlation IDs for request tracing
+  - Log files: `logs/app.log`, `logs/errors.log`
 
-```bash
-# One-command startup (automatically seeds database on first run)
-docker-compose up
-```
+- **Prometheus Metrics**:
+  - HTTP request counters and histograms (latency tracking)
+  - Business metrics:
+    - `partner_ingest_jobs_total` — Total ingest jobs by status
+    - `partner_ingest_duration_seconds` — Job processing time
+    - `rma_requests_total` — RMA requests by status
+    - `flash_sale_purchases_total` — Flash sale transactions
+    - `low_stock_products` — Products below threshold (NEW)
+  - Custom metrics endpoint: `/metrics` (Prometheus format)
 
-The application will be available at **http://localhost:5000**
+- **Health Checks**:
+  - `/health` — Application health status
+  - `/health/detailed` — Component-level health (database, worker, cache)
+  - Docker health checks for automatic restart
 
-**Default Login Credentials (automatically created):**
-- **Admin**: username: `admin1`, password: `123`
-- **Customer**: username: `john`, password: `password123`
+- **Debugging Support**:
+  - Logs capture full request lifecycle (authentication, validation, business logic, errors)
+  - Metrics enable performance analysis and capacity planning
+  - Activity logs in RMA system provide audit trail
+  - Partner ingest jobs track retry attempts and failure reasons
+  - Flash sale circuit breaker logs gateway failures
+  - Example: To debug slow checkout, check `http_request_duration_seconds_bucket{endpoint="/checkout"}`
+  - Example: To debug failed RMA, check `logs/app.log` for correlation ID and trace full workflow
 
-The database is automatically seeded with demo data on first startup.
+---
+
+## 🐳 Docker Deployment
 
 ### Docker Architecture
 
 The application runs in two containers:
-- **web**: Flask application (port 5000)
+- **web**: Flask application (http://localhost:5000)
   - Handles web requests
   - Admin interface
   - Customer portal
+  - Metrics endpoint
   
 - **worker**: Background worker
   - Processes partner feed imports
   - Handles async job queue
   - Retry with exponential backoff
+  - Health monitoring
 
 ### Quick Docker Commands
 
-```bash
-# Start services in background
+\`\`\`bash
+# Start services
+docker-compose up
+
+# Start in background
 docker-compose up -d
+
+# Rebuild after code changes
+docker-compose build && docker-compose up
 
 # View logs
 docker-compose logs -f web
 docker-compose logs -f worker
 
-# View all logs
-docker-compose logs -f
+# Check service health
+docker-compose ps
+curl http://localhost:5000/health
 
-# Run tests in container
+# Run tests
 docker-compose exec web python -m pytest -v
 
-# Access Python shell in container
-docker-compose exec web python
+# Run specific tests
+docker-compose exec web python -m pytest tests/test_low_stock_alerts.py -v
 
-# Run database migrations
-docker-compose exec web python scripts/run_migrations.py
+# View metrics
+curl http://localhost:5000/metrics
+
+# Check logs for debugging
+docker-compose exec web cat logs/app.log
 
 # Stop services
 docker-compose down
 
-# Stop and remove volumes (clean slate)
+# Reset everything (deletes all data)
 docker-compose down -v
+\`\`\`
 
-# Rebuild after code changes
-docker-compose build
-docker-compose up
-```
+### Environment Variables
 
-### Docker Volumes
+Configure in `docker-compose.yml` or create a `.env` file:
 
-Persistent data is stored in Docker volumes:
-- `checkpoint3_db_data`: SQLite database
-- `checkpoint3_uploads`: RMA image uploads
-
-Data persists between container restarts. To reset:
-```bash
-docker-compose down -v
-docker-compose up
-```
-
-### Environment Variables (Docker)
-
-Set in `docker-compose.yml` or create a `.env` file:
-
-```bash
+\`\`\`bash
 # Application
 APP_DB_PATH=/app/data/app.sqlite
 APP_SECRET_KEY=your-secret-key-here
 
+# Low Stock Alerts (NEW — Checkpoint 4)
+LOW_STOCK_THRESHOLD=5
+
 # Admin
 ADMIN_API_KEY=admin-demo-key
+
+# Observability
+LOG_LEVEL=INFO
+ENABLE_METRICS=true
 
 # Partner Integration
 HASH_KEYS=false
 
 # Flash Sales
 ENABLE_FLASH_SALES=true
-```
+CACHE_TTL=300
+\`\`\`
 
-### Health Checks
+**Using Environment Variables**:
+\`\`\`bash
+# Option 1: Set in shell
+export LOW_STOCK_THRESHOLD=10
+docker-compose up
 
-Docker health checks automatically monitor service health:
-- Web: `http://localhost:5000/health`
-- Worker: Checks if worker process is running
+# Option 2: Inline
+LOW_STOCK_THRESHOLD=10 docker-compose up
 
-View health status:
-```bash
-docker-compose ps
-```
-
----
-
-## 🛠️ Manual Setup (Local Development)
-
-### Prerequisites
-- Python 3.10 or higher
-- pip
-- virtualenv (recommended)
-
-### Installation Steps
-
-1. **Create virtual environment**
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-2. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-3. **Initialize database**
-```bash
-# Create schema and run migrations
-python -m src.main
-
-# Seed demo data (includes default admin account)
-python -m src.seed
-python -m db.seed_flash_sales
-```
-
-**Default Credentials (after seeding):**
-- **Admin**: username: `admin1`, password: `123`
-- **Customer**: username: `john`, password: `password123`
-- **Customer**: username: `jane`, password: `password123`
-- **Customer**: username: `alice`, password: `password123`
-
-> ⚠️ **Important**: Each person running the app has their own local database. 
-> The database file is NOT shared between different laptops/machines.
-> Everyone must run `python -m src.seed` to create accounts on their own machine.
-
-4. **Set environment variables**
-```bash
-export APP_DB_PATH=$(pwd)/app.sqlite
-export ADMIN_API_KEY=admin-demo-key
-export APP_SECRET_KEY=dev-insecure-secret
-```
-
-5. **Start Flask application**
-```bash
-python -m src.app
-# Application runs on http://127.0.0.1:5000
-```
-
-6. **Start background worker (in separate terminal)**
-```bash
-source .venv/bin/activate
-export APP_DB_PATH=$(pwd)/app.sqlite
-python -c "from src.partners.ingest_queue import start_worker; from pathlib import Path; start_worker(str(Path('.').resolve()/ 'app.sqlite'))"
-```
+# Option 3: Create .env file
+echo "LOW_STOCK_THRESHOLD=10" > .env
+docker-compose up
+\`\`\`
 
 ---
 
-## 📋 Usage Guide
+## 🎯 Checkpoint 4 Features Summary
 
-### Customer Workflow
+### 1. Order History Filtering (Feature 2.1)
+Enhanced order history with flexible filtering capabilities:
+- Filter by status, date range, and keyword search
+- Server-side filtering with parameterized SQL
+- Bookmarkable URLs via GET parameters
 
-1. **Browse and Purchase**
-   - Visit http://localhost:5000
-   - Register/login
-   - Browse products
-   - Add to cart and checkout
+**Files**: `src/app.py`, `src/templates/dashboard.html`
 
-2. **Request Return**
-   - Go to Dashboard
-   - Find order with "Request Return" button
-   - Fill return form with reason
-   - Upload images (optional)
-   - Submit request
+### 2. Low Stock Alerts (Feature 2.2)
+Configurable alerts for products below stock threshold:
+- Environment variable: `LOW_STOCK_THRESHOLD` (default: 5)
+- Admin dashboard display sorted by stock level
+- REST API: `GET /api/low-stock`
 
-3. **Track Return**
-   - Click "My Returns" in navigation
-   - View status of all returns
-   - Track progress through workflow stages
+**Files**: `src/app.py`, `src/product_repo.py`, `src/templates/admin_home.html`, `tests/test_low_stock_alerts.py`
 
-### Admin Workflow
+### 3. RMA Notifications (Feature 2.3)
+Real-time notifications for RMA status changes:
+- Notification badge with unread count
+- Auto-polling every 30 seconds
+- Disposition-aware messages
+- Database-backed persistence
 
-1. **Access Admin Portal**
-   - Go to http://localhost:5000/rma/admin/login
-   - Login with admin credentials
-   - Navigate admin dashboard
+**Files**: `src/notifications.py` (NEW), `src/rma/manager.py`, `migrations/0004_add_notifications.sql` (NEW)
 
-2. **Process Returns**
-   - **Validation Queue**: Review and approve/reject new requests
-   - **Shipping Queue**: Monitor items being shipped
-   - **Receiving Queue**: Mark items as received
-   - **Inspection Queue**: Perform quality inspection
-   - **Disposition Queue**: Decide refund/replacement/repair/reject
-   - **Processing Queue**: Complete refunds or replacements
+---
 
-3. **View Analytics**
-   - Metrics dashboard shows RMA statistics
-   - Activity logs for audit trail
-   - Completed RMA history
+## 🔍 Observability & Debugging (Checkpoint 3)
 
-### Partner Integration
+### Structured Logging
 
-1. **Onboard Partner**
-```bash
-curl -X POST http://localhost:5000/partner/onboard \
-  -H "X-Admin-Key: admin-demo-key" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"DemoPartner","description":"Test Partner","format":"json"}'
-```
+**Log Files**:
+- `logs/app.log` — All application logs (INFO+)
+- `logs/errors.log` — Error logs only
 
-2. **Upload Product Feed**
-```bash
-curl -X POST 'http://localhost:5000/partner/ingest?async=1' \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: <partner-key>' \
-  --data '[{"sku":"sku-1","name":"Demo Product","price":9.99,"stock":10}]'
-```
+**What Gets Logged**:
+- HTTP requests/responses with timing
+- Authentication attempts
+- Business events (orders, RMA status changes, partner ingests)
+- Database operations
+- External service calls with retry attempts
+- Background job processing
 
-3. **Monitor Jobs**
-```bash
-curl -H "X-Admin-Key: admin-demo-key" http://localhost:5000/partner/jobs
-```
+**Debugging Examples**:
+\`\`\`bash
+# Find RMA-specific logs
+docker-compose exec web grep "RMA-2025-001" logs/app.log
+
+# Find recent errors
+docker-compose exec web tail -n 1000 logs/errors.log
+
+# Track request by correlation ID
+docker-compose exec web grep "req-abc123" logs/app.log
+\`\`\`
+
+### Prometheus Metrics
+
+**Available Metrics**:
+- `http_requests_total` — HTTP request counters by endpoint
+- `http_request_duration_seconds` — Request latency histograms
+- `partner_ingest_jobs_total` — Ingest jobs by status
+- `rma_requests_total` — RMA requests by status
+- `flash_sale_purchases_total` — Flash sale transactions
+- `low_stock_products` — Products below threshold (NEW)
+
+**Access Metrics**:
+\`\`\`bash
+curl http://localhost:5000/metrics
+curl -H "X-Admin-Key: admin-demo-key" http://localhost:5000/partner/metrics
+\`\`\`
+
+**Debugging with Metrics**:
+- Slow checkout → Check `http_request_duration_seconds_bucket{endpoint="/checkout"}`
+- Failed ingests → Check `partner_ingest_jobs_total{status="failed"}`
+- RMA bottlenecks → Check `rma_requests_total` by status
+- Low stock impact → Check `low_stock_products` gauge
+
+### Debugging Scenarios
+
+**Scenario: Order not appearing in dashboard**
+1. Check logs: `grep "user_id=<id>" logs/app.log | grep "sale"`
+2. Check database: Query `sale` table for user_id
+3. Check metrics: `curl http://localhost:5000/metrics | grep dashboard`
+
+**Scenario: Partner ingest job stuck**
+1. Check job status: `curl -H "X-Admin-Key: admin-demo-key" http://localhost:5000/partner/jobs`
+2. Check worker logs: `docker-compose logs worker | grep job_id=<id>`
+3. Check metrics: `curl http://localhost:5000/metrics | grep partner_ingest`
+
+**Scenario: RMA notification not received**
+1. Check notification created: Query `notifications` table
+2. Check RMA activity log: Query `rma_activity_log` for status changes
+3. Check logs: `grep "RMA-<number>" logs/app.log | grep notification`
+4. Check polling: Browser console → Network tab → verify `/api/notifications/count`
+
+**Scenario: Low stock alerts not showing**
+1. Check threshold: `echo $LOW_STOCK_THRESHOLD`
+2. Query database: Check products with `stock <= threshold AND active=1`
+3. Check logs: `grep "low_stock" logs/app.log`
+4. Override: Visit `http://localhost:5000/admin?low_stock_threshold=10`
 
 ---
 
 ## 🧪 Testing
 
-### Run All Tests
-```bash
-# Local
+\`\`\`bash
+# Run all tests
 pytest -v
 
-# Docker
+# Docker tests
 docker-compose exec web python -m pytest -v
-```
 
-### Test Categories
-```bash
-# Unit tests
-pytest tests/unit_test.py -v
-
-# Integration tests
-pytest tests/test_integration_partner_ingest.py -v
-
-# RMA tests
-pytest tests/test_admin_auth.py -v
-pytest tests/test_audit_entries.py -v
-
-# Rate limiting
-pytest tests/test_rate_limiting.py -v
-
-# Concurrent operations
-pytest tests/test_concurrent_checkout.py -v
-```
+# Specific test categories
+pytest tests/test_low_stock_alerts.py -v          # Low stock (NEW)
+pytest tests/test_integration_partner_ingest.py -v # Partner integration
+pytest tests/test_concurrent_checkout.py -v        # Concurrency
+pytest tests/test_admin_auth.py -v                # RMA auth
+pytest tests/test_rate_limiting.py -v              # Rate limiting
+\`\`\`
 
 ---
 
 ## 📁 Project Structure
 
-```
-.
-├── src/
-│   ├── app.py                 # Main Flask application
-│   ├── dao.py                 # Database access layer
-│   ├── product_repo.py        # Product repository
-│   ├── payment.py             # Payment processing
-│   ├── observability.py       # Metrics and logging
-│   │
-│   ├── adapters/              # Partner feed adapters
-│   │   ├── csv_adapter.py
-│   │   ├── json_adapter.py
-│   │   └── registry.py
-│   │
-│   ├── flash_sales/           # Flash sale features
-│   │   ├── flash_sale_manager.py
-│   │   ├── cache.py
-│   │   ├── circuit_breaker.py
-│   │   ├── rate_limiter.py
-│   │   └── routes.py
-│   │
-│   ├── partners/              # Partner integration
-│   │   ├── routes.py
-│   │   ├── ingest_queue.py
-│   │   ├── partner_ingest_service.py
-│   │   ├── security.py
-│   │   └── metrics.py
-│   │
-│   ├── rma/                   # Returns system (NEW)
-│   │   ├── routes.py          # RMA endpoints
-│   │   ├── manager.py         # Business logic
-│   │   └── templates/         # RMA templates
-│   │
-│   └── templates/             # HTML templates
-│
-├── db/
-│   ├── init.sql              # Database schema
-│   ├── flash_sales.sql       # Flash sales tables
-│   ├── partners.sql          # Partner tables
-│   └── migrations/           # Database migrations
-│
-├── tests/                    # Test suite
-├── docs/                     # Documentation
-├── docker-compose.yml        # Docker configuration
-├── Dockerfile               # Container image
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
+\`\`\`
+src/
+├── app.py                    # Main Flask app (order filtering, low stock)
+├── dao.py                    # Database access layer
+├── product_repo.py           # Product repository (low stock queries)
+├── notifications.py          # Notification service (NEW — Checkpoint 4)
+├── observability.py          # Metrics and logging
+├── monitoring_routes.py      # Health checks
+├── adapters/                 # Partner feed adapters
+├── flash_sales/              # Flash sale features
+├── partners/                 # Partner integration
+├── rma/                      # RMA system
+└── templates/                # HTML templates
+
+db/
+├── init.sql                  # Database schema
+├── migrations/
+│   └── 0004_add_notifications.sql  # Notifications table (NEW)
+
+tests/
+├── test_low_stock_alerts.py  # Low stock tests (NEW)
+└── ...
+
+docs/
+├── ADR/
+│   ├── 0021-lightweight-features-design.md      # Checkpoint 4 (NEW)
+│   └── 0022-documentation-organization.md        # Doc structure (NEW)
+└── UML/
+    └── uml_views.md          # 4+1 views (updated for Checkpoint 4)
+\`\`\`
+
+---
+
+## 📚 Documentation
+
+- **[ADR 0021: Checkpoint 4 Features](docs/ADR/0021-lightweight-features-design.md)** — Design decisions
+- **[ADR 0022: Documentation Organization](docs/ADR/0022-documentation-organization.md)** — Doc structure
+- **[UML Diagrams](docs/UML/uml_views.md)** — 4+1 architectural views
+- **[Checkpoint 3 Summary](docs/Checkpoint3.md)** — Previous features
 
 ---
 
 ## 🔧 Configuration
 
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_DB_PATH` | SQLite database path | `app.sqlite` |
-| `APP_SECRET_KEY` | Flask session secret | `dev-insecure-secret` |
-| `ADMIN_API_KEY` | Admin API key | `admin-demo-key` |
-| `HASH_KEYS` | Hash API keys before storing | `false` |
-| `ENABLE_FLASH_SALES` | Enable flash sale features | `true` |
-
-### Database Schema
-
-The application uses SQLite with the following main tables:
-- `user` - User accounts
-- `product` - Product catalog
-- `sale` / `sale_item` - Orders
-- `rma_requests` - Return requests
-- `rma_items` - Items in returns
-- `rma_activity_log` - Activity tracking
-- `refunds` - Refund records
-- `partner` / `partner_api_keys` - Partner management
-- `partner_ingest_jobs` - Job queue
+| Variable | Description | Default | Checkpoint |
+|----------|-------------|---------|------------|
+| `APP_DB_PATH` | Database path | `app.sqlite` | 1 |
+| `APP_SECRET_KEY` | Session secret | `dev-insecure-secret` | 1 |
+| `ADMIN_API_KEY` | Admin key | `admin-demo-key` | 2 |
+| `LOW_STOCK_THRESHOLD` | Low stock threshold | `5` | **4 (NEW)** |
+| `LOG_LEVEL` | Logging level | `INFO` | 3 |
+| `ENABLE_METRICS` | Prometheus metrics | `true` | 3 |
 
 ---
 
-## 📎 Appendix: Partner (VAR) Catalog Ingest — Developer Guide
+## 🔐 Security Notes
 
-This appendix preserves the original developer-facing guidance for the partner ingest system.
+- **Default credentials for development only** — Change in production
+- **Admin API key** should be rotated regularly
+- **Flask secret key** must be cryptographically secure
+- **HTTPS required** for production deployments
 
-### Key endpoints and UX notes
-- GET /partner/contract — machine-readable contract (JSON)
-- GET /partner/contract/example — example payload a partner can copy (JSON)
-- GET /partner/help — quickstart and copyable curl examples (JSON)
-- POST /partner/ingest — ingest endpoint (requires X-API-Key for partner auth)
-- GET /partner/admin — admin UI; buttons disabled until session is confirmed
-- POST /partner/admin/login — login (JSON or form); sets admin session cookie
-- POST /partner/onboard_form — admin UI helper to onboard partner and return API key
-- GET /partner/jobs — admin-only JSON jobs listing
-- GET /partner/metrics — admin-only metrics dashboard (reads Prometheus registry)
-- GET /partner/audit — admin-only audit viewer
+---
 
-Error responses are normalized to JSON:
-```json
-{ "error": "<Name>", "details": "<message>" }
-```
+## 👥 Contributors
 
-### Demo commands (copy/paste)
-
-1) Contract & example (pretty-print with jq)
-```bash
-curl -sS http://127.0.0.1:5000/partner/contract | jq .
-curl -sS http://127.0.0.1:5000/partner/contract/example | jq .
-```
-
-2) Quickstart/help
-```bash
-curl -sS http://127.0.0.1:5000/partner/help | jq .
-```
-
-3) Show JSON error for missing API key
-```bash
-curl -i -sS -X POST http://127.0.0.1:5000/partner/ingest -H 'Content-Type: application/json' -d '[]'
-```
-
-4) Admin login + onboard (session-based)
-```bash
-# login and save cookie
-curl -i -c cookies.txt -H "Content-Type: application/json" \
-   -d '{"admin_key":"admin-demo-key"}' -X POST http://127.0.0.1:5000/partner/admin/login
-
-# create partner using session cookie (returns the API key)
-curl -i -b cookies.txt -H "Content-Type: application/json" \
-   -d '{"name":"DemoPartner","description":"Demo","format":"json"}' \
-   -X POST http://127.0.0.1:5000/partner/onboard_form
-```
-
-### Schema notes
-
-This repository contains schema helpers under `db/`:
-- `db/init.sql` — full application schema (products, partners, durable ingest jobs, schedules)
-- `db/partners.sql` — lightweight subset documenting core partner tables (`partner`, `partner_api_keys`)
-
-Initialize database with the full schema (equivalent to the app init):
-```bash
-sqlite3 app.sqlite < db/init.sql
-# or run the app initialization helper
-python -m src.main
-```
-
-
-## 🎯 Key Features in Detail
-
-### RMA System Features
-
-1. **Smart Order Detection**
-   - Automatically hides "Request Return" for:
-     - Orders with existing RMA requests
-     - Replacement orders from previous returns
-   - Shows "REPLACEMENT" badge for replacement orders
-
-2. **Automated Workflows**
-   - Auto-validation checks
-   - Status transitions based on disposition type
-   - Inventory adjustments
-   - Activity logging
-
-3. **Admin Tools**
-   - Multiple queue views for different stages
-   - Bulk operations
-   - Search and filter
-   - Metrics dashboard
-
-Quick start (dev)
-
-1) Setup a virtualenv and install dependencies
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-2) Initialize the database (idempotent)
-
-```bash
-# create schema
-python -m src.main
-
-# optional: seed demo data (users + products)
-python -m src.seed
-#seed for flash sale products
-python -m db.seed_flash_sales
-```
-
-3) Start the Flask app (single-process dev)
-
-```bash
-# default: 127.0.0.1:5000
-python -m src.app
-
-# or with overridden env vars
-APP_DB_PATH=$(pwd)/app.sqlite ADMIN_API_KEY=admin-demo-key APP_SECRET_KEY=dev-insecure-secret python -m src.app
-```
-
-4) Start the background worker in a second terminal
-
-```bash
-APP_DB_PATH=$(pwd)/app.sqlite python -c "import sys, pathlib; sys.path.insert(0, str(pathlib.Path('.').resolve())); from src.partners.ingest_queue import start_worker; from pathlib import Path; start_worker(str(Path('.').resolve()/ 'app.sqlite'))"
-```
-
-Important environment variables
-- `APP_DB_PATH` — path to SQLite DB file (default: `app.sqlite` in repo)
-- `ADMIN_API_KEY` — demo admin key (default: `admin-demo-key`)
-- `APP_SECRET_KEY` — Flask session secret (set to a strong value in non-dev)
-- `HASH_KEYS` — set to `true` to hash API keys before storing (default: `false`)
-
-Key endpoints and UX notes
-- `GET /partner/contract` — machine-readable contract (JSON)
-- `GET /partner/contract/example` — example payload a partner can copy (JSON)
-- `GET /partner/help` — quickstart and copyable curl examples (JSON)
-- `POST /partner/ingest` — ingest endpoint (requires `X-API-Key` for partner auth)
-- `GET /partner/admin` — admin UI; buttons disabled until session is confirmed
-- `POST /partner/admin/login` — login (JSON or form); sets admin session cookie
-- `POST /partner/onboard_form` — admin UI helper to onboard partner and return API key
-- `GET /partner/jobs` — admin-only JSON jobs listing
-- `GET /partner/metrics` — admin-only metrics dashboard (reads Prometheus registry)
-- `GET /partner/audit` — admin-only audit viewer
-
-Error responses
-- API errors are normalized to JSON: `{ "error": "<Name>", "details": "<message>" }`.
-   This makes it simple for partner automation to parse and react to failures.
-
-Demo commands (copy/paste)
-
-1) Contract & example (pretty-print with `jq`)
-
-```bash
-curl -sS http://127.0.0.1:5000/partner/contract | jq .
-curl -sS http://127.0.0.1:5000/partner/contract/example | jq .
-```
-
-2) Quickstart/help
-
-```bash
-curl -sS http://127.0.0.1:5000/partner/help | jq .
-```
-
-3) Show JSON error for missing API key
-
-```bash
-curl -i -sS -X POST http://127.0.0.1:5000/partner/ingest -H 'Content-Type: application/json' -d '[]'
-```
-
-4) Admin login + onboard (session-based)
-
-```bash
-# login and save cookie
-curl -i -c cookies.txt -H "Content-Type: application/json" \
-   -d '{"admin_key":"admin-demo-key"}' -X POST http://127.0.0.1:5000/partner/admin/login
-
-# create partner using session cookie (returns the API key)
-curl -i -b cookies.txt -H "Content-Type: application/json" \
-   -d '{"name":"DemoPartner","description":"Demo","format":"json"}' \
-   -X POST http://127.0.0.1:5000/partner/onboard_form
-```
-
-Running tests
-
-```bash
-pytest -q
-```
-
-Notes and security guidance
-- The demo `ADMIN_API_KEY` is `admin-demo-key` unless you override it. Do not commit real secrets.
-- In production:
-   - Use a secure `APP_SECRET_KEY` and rotate admin keys.
-   - Replace SQLite + in-process worker with a durable queue (Redis, RabbitMQ, Cloud Tasks).
-   - Harden cookies (SameSite, Secure) and add CSRF protections for forms.
-
-Further reading
-- ADR: `docs/ADR/0013-usability.md` — describes contract, example, quickstart and normalized errors.
-
-Maintainers
 - Pragya Chapagain
 - Yanlin Wu
 
-```
+---
+
+## 📝 License
+
+Educational project for software engineering course.
