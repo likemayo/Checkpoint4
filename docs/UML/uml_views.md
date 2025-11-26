@@ -1,6 +1,6 @@
-# UML Diagrams - Checkpoint 3
+# UML Diagrams - Checkpoint 4
 
-This document presents the 4+1 Architectural Views for the complete retail system, including Flash Sales, Partner Integration, **RMA (Returns & Refunds)**, and **Observability** modules.
+This document presents the 4+1 Architectural Views for the complete retail system, including Flash Sales, Partner Integration, **RMA (Returns & Refunds)**, **Observability**, **Order Filtering & Search**, **Low Stock Alerts**, and **RMA Notifications** modules.
 
 ---
 
@@ -153,6 +153,29 @@ classDiagram
         COMPLETED
         CANCELLED
     }
+    
+    %% ====== NOTIFICATIONS MODULE (NEW) ======
+    
+    class NotificationService {
+        +create_rma_status_notification(conn, user_id, rma_id, rma_number, old_status, new_status, disposition) int
+        +get_user_notifications(conn, user_id, unread_only, limit) List~Notification~
+        +get_unread_count(conn, user_id) int
+        +mark_as_read(conn, notification_id) bool
+        +mark_all_as_read(conn, user_id) int
+    }
+    
+    class Notification {
+        +id: int
+        +user_id: int
+        +type: str
+        +title: str
+        +message: str
+        +rma_id: int
+        +rma_number: str
+        +is_read: bool
+        +created_at: datetime
+        +read_at: datetime
+    }
 
     %% ====== OBSERVABILITY MODULE ======
     
@@ -189,6 +212,7 @@ classDiagram
         +search_products(query: str) List~Product~
         +get_product(id: int) Product
         +check_stock(id: int, qty: int) bool
+        +get_low_stock_products(threshold: int) List~Product~
     }
 
     class AProductRepo {
@@ -196,6 +220,7 @@ classDiagram
         +get_all_products() List~Product~
         +get_product(id: int) Product
         +check_stock(id: int, qty: int) bool
+        +get_low_stock_products(threshold: int) List~Product~
     }
 
     class SalesRepo {
@@ -242,6 +267,10 @@ classDiagram
     RMAManager --> RMAStatus : enforces
     RMAManager --> RMADisposition : applies
     RMAManager --> MetricsCollector : tracks metrics
+    RMAManager --> NotificationService : creates notifications
+    
+    %% Notification relationships
+    NotificationService --> Notification : manages
     
     %% Observability relationships
     SalesRepo --> MetricsCollector : records metrics
@@ -255,9 +284,89 @@ classDiagram
     note for FlashSaleManager "Flash Sales Module:\nManages time-based discounts"
     note for PartnerIngestService "Partner Integration Module:\nIngests external product feeds"
     note for RMAManager "RMA Module:\n10-stage workflow with\n5 disposition types"
+    note for NotificationService "Notification Module (NEW):\nRMA status change alerts\nwith disposition-aware messages"
+    note for ProductRepo "Enhanced (NEW):\nLow stock alert queries\nwith configurable threshold"
     note for MetricsCollector "Observability:\nTracks orders, refunds,\nperformance, errors"
     note for RateLimiter "Shared Tactic:\nProtects both flash sales\nand partner endpoints"
     note for CircuitBreaker "Availability Pattern:\nPayment service protection"
+```
+
+## Process View: RMA Notification Flow (NEW - Checkpoint 4)
+
+```mermaid
+sequenceDiagram
+  participant C as Customer
+  participant A as Flask App
+  participant RM as RMAManager
+  participant NS as NotificationService
+  participant DB as SQLite
+  participant UI as Dashboard (Browser)
+
+  C->>A: POST /rma/submit (sale_id, reason, photo)
+  A->>RM: submit_rma(user_id, sale_id, reason, photo_path)
+  RM->>DB: INSERT INTO rma_requests (status='SUBMITTED')
+  RM->>RM: _log_activity(rma_id, null, 'SUBMITTED', notes)
+  RM->>DB: SELECT user_id, rma_number, disposition FROM rma_requests
+  RM->>NS: create_rma_status_notification(conn, user_id, rma_id, rma_number, null, 'SUBMITTED', null)
+  NS->>NS: Generate title: "Return Request Submitted"
+  NS->>NS: Generate message: "Your return request RMA-XXX has been submitted..."
+  NS->>DB: INSERT INTO notifications (user_id, type, title, message, rma_id, is_read=0)
+  NS-->>RM: notification_id
+  RM-->>A: rma_id
+  A-->>C: RMA created
+
+  Note over UI: Customer navigates to dashboard
+  UI->>A: GET /dashboard
+  A-->>UI: Render page with notification badge
+  UI->>A: GET /api/notifications/count (auto-poll every 30s)
+  A->>NS: get_unread_count(conn, user_id)
+  NS->>DB: SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0
+  DB-->>NS: count
+  NS-->>A: {"count": 1}
+  A-->>UI: JSON response
+  UI->>UI: Update badge with count
+
+  Note over C: Admin approves RMA, changes status
+  Admin->>A: POST /admin/rma/:id/approve
+  A->>RM: transition_status(rma_id, 'APPROVED', 'admin')
+  RM->>DB: UPDATE rma_requests SET status='APPROVED'
+  RM->>RM: _log_activity(rma_id, 'SUBMITTED', 'APPROVED', notes)
+  RM->>DB: SELECT user_id, rma_number, disposition
+  RM->>NS: create_rma_status_notification(conn, user_id, rma_id, rma_number, 'SUBMITTED', 'APPROVED', null)
+  NS->>NS: Generate title: "Return Request Approved"
+  NS->>NS: Generate message: "Your return request RMA-XXX has been approved..."
+  NS->>DB: INSERT INTO notifications
+  NS-->>RM: notification_id
+  RM-->>A: success
+
+  UI->>A: GET /api/notifications/count (poll triggered)
+  A-->>UI: {"count": 2}
+  UI->>UI: Update badge (shows 2)
+
+  C->>A: GET /notifications
+  A->>NS: get_user_notifications(conn, user_id, unread_only=False, limit=100)
+  NS->>DB: SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC
+  DB-->>NS: notification rows
+  NS-->>A: List[Notification]
+  A-->>C: Render notifications.html (list of notifications)
+
+  C->>A: POST /notifications/mark-read/:id
+  A->>NS: mark_as_read(conn, notification_id)
+  NS->>DB: UPDATE notifications SET is_read=1, read_at=NOW() WHERE id=?
+  NS-->>A: success
+  A-->>C: redirect to /notifications
+
+  Note over RM,NS: DISPOSITION status creates disposition-specific notifications
+  Admin->>A: POST /admin/rma/:id/disposition (disposition='REPAIR')
+  A->>RM: set_disposition(rma_id, 'REPAIR', 'admin')
+  RM->>DB: UPDATE rma_requests SET disposition='REPAIR', status='DISPOSITION'
+  RM->>RM: _log_activity(rma_id, 'INSPECTED', 'DISPOSITION', notes)
+  RM->>DB: SELECT user_id, rma_number, disposition='REPAIR'
+  RM->>NS: create_rma_status_notification(..., new_status='DISPOSITION', disposition='REPAIR')
+  NS->>NS: Generate title: "Repair Approved"
+  NS->>NS: Generate message: "Your item RMA-XXX will be repaired..."
+  NS->>DB: INSERT INTO notifications
+  NS-->>RM: notification_id
 ```
 
 ## Process View: RMA Workflow Sequence
@@ -449,7 +558,9 @@ flowchart TD
 - **Smart Seeding**: First-run database seeding (preserves data on subsequent starts)
 - **Health Checks**: `/health` endpoint for orchestration
 - **Port Mapping**: Web on 5000, accessible via localhost
-- **Environment Variables**: `APP_DB_PATH`, `SEED_DATA`, `OBSERVABILITY_ENABLED`
+- **Environment Variables**: 
+  - `APP_DB_PATH`, `SEED_DATA`, `OBSERVABILITY_ENABLED`
+  - `LOW_STOCK_THRESHOLD` (NEW - Checkpoint 4): Configurable inventory alert threshold (default: 5)
 
 ## Deployment View (Legacy - Pre-Docker)
 ```mermaid
@@ -517,6 +628,8 @@ subgraph App[Application Modules]
     rma_routes["src/rma/routes.py\n- RMA workflow endpoints"]
     rma_manager["src/rma/manager.py\n- RMAManager, transitions"]
     
+    notifications["src/notifications.py (NEW)\n- NotificationService\n- RMA status notifications"]
+    
     observability["src/observability/\n- metrics_collector.py\n- structured_logger.py"]
     monitoring["src/templates/monitoring/\n- dashboard.html"]
     
@@ -546,6 +659,9 @@ subgraph App[Application Modules]
   rma_routes --> rma_manager
   rma_manager --> dao
   rma_manager --> observability
+  rma_manager --> notifications
+  
+  notifications --> observability
   
   monitoring --> observability
   
@@ -555,11 +671,15 @@ subgraph App[Application Modules]
 ```
 
 **Module Descriptions:**
-- **src/app.py**: Main Flask app with before_request/after_request middleware for observability
+- **src/app.py**: Main Flask app with before_request/after_request middleware for observability, order filtering/search
 - **src/rma/**: Returns & Refunds module with 10-stage workflow and 5 disposition types
+- **src/notifications.py** (NEW - Checkpoint 4): Notification service for RMA status changes with disposition-aware messaging
+- **src/product_repo.py** (ENHANCED - Checkpoint 4): Added `get_low_stock_products()` for inventory alerts
 - **src/observability/**: Metrics collection (hybrid DB + in-memory) and structured logging
 - **src/templates/monitoring/**: Admin-only monitoring dashboard with auto-refresh
+- **src/templates/dashboard.html** (ENHANCED - Checkpoint 4): Order filtering UI and notification badge with auto-polling
 - **docker-entrypoint.sh**: Smart seeding script (only seeds if DB is empty)
+- **docker-compose.yml** (ENHANCED - Checkpoint 4): Added `LOW_STOCK_THRESHOLD` environment variable
 
 ## Implementation View: Package / Module Diagram (Legacy - Pre-Checkpoint 3)
 
@@ -609,7 +729,7 @@ flowchart LR
   actorPartner[(Partner)]
   actorAdmin[(Admin)]
 
-  subgraph SystemBoundary["Retail E-Commerce System (Checkpoint 3)"]
+  subgraph SystemBoundary["Retail E-Commerce System (Checkpoint 4)"]
     direction TB
     
     subgraph CoreUC["Core Shopping"]
@@ -623,16 +743,29 @@ flowchart LR
       UC8((View Receipt))
     end
     
+    subgraph OrderMgmt["Order Management (NEW)"]
+      UC18((Filter Orders by Status))
+      UC19((Search Orders))
+      UC20((Date Range Filter))
+    end
+    
     subgraph RMAUC["Returns & Refunds"]
       UC11((Submit RMA))
       UC12((Upload Photo))
       UC13((Track RMA Status))
       UC14((View Store Credit))
+      UC21((View RMA Notifications))
+      UC22((Mark Notification Read))
     end
     
     subgraph PartnerUC["Partner Integration"]
       UC9((Partner Catalog Ingest))
       UC10((Admin Onboard Partner))
+    end
+    
+    subgraph InventoryUC["Inventory Management (NEW)"]
+      UC23((View Low Stock Alerts))
+      UC24((Configure Stock Threshold))
     end
     
     subgraph ObservabilityUC["Monitoring & Observability"]
@@ -654,6 +787,11 @@ flowchart LR
   actorUser --> UC12
   actorUser --> UC13
   actorUser --> UC14
+  actorUser --> UC18
+  actorUser --> UC19
+  actorUser --> UC20
+  actorUser --> UC21
+  actorUser --> UC22
 
   actorPartner --> UC9
   
@@ -661,17 +799,26 @@ flowchart LR
   actorAdmin --> UC15
   actorAdmin --> UC16
   actorAdmin --> UC17
+  actorAdmin --> UC23
+  actorAdmin --> UC24
 
   style SystemBoundary fill:#fff7e6,stroke:#333,stroke-width:2px
   style CoreUC fill:#e8f5e9,stroke:#333,stroke-width:1px
+  style OrderMgmt fill:#e1f5fe,stroke:#333,stroke-width:1px
   style RMAUC fill:#fff3e0,stroke:#333,stroke-width:1px
   style PartnerUC fill:#e3f2fd,stroke:#333,stroke-width:1px
+  style InventoryUC fill:#f1f8e9,stroke:#333,stroke-width:1px
   style ObservabilityUC fill:#f3e5f5,stroke:#333,stroke-width:1px
 ```
 
 **New Use Cases (Checkpoint 3):**
 - **UC11-UC14**: RMA workflow enabling customers to submit returns, upload evidence, and track disposition
 - **UC15-UC17**: Admin-only observability features for system monitoring and audit review
+
+**New Use Cases (Checkpoint 4):**
+- **UC18-UC20**: Order history filtering and search (status, date range, keyword)
+- **UC21-UC22**: RMA notification system with badge and mark-as-read functionality
+- **UC23-UC24**: Low stock alerts with configurable threshold for inventory management
 
 ---
 
@@ -697,5 +844,33 @@ flowchart LR
 - **Audit Trail**: Complete history of status transitions and disposition decisions
 - **Store Credit**: Tracks credit balance and redemption
 - **Metrics Integration**: RMA events tracked in observability system
+
+---
+
+## Summary of Checkpoint 4 Additions
+
+### Order History Filtering & Search
+- **Status Filtering**: Filter by COMPLETED, PENDING, PROCESSING, CANCELLED, REFUNDED, RETURNED
+- **Date Range**: Filter orders by start and end dates
+- **Keyword Search**: Search by order ID or product name
+- **Dynamic SQL**: Backend builds filtered queries based on user input
+- **UI Integration**: Filter form in dashboard with dropdowns and date pickers
+
+### Low Stock Alerts
+- **Configurable Threshold**: Environment variable `LOW_STOCK_THRESHOLD` (default: 5 units)
+- **Admin Dashboard Display**: Shows products at or below threshold with red styling
+- **Query Optimization**: Sorted by stock level (ascending) for priority visibility
+- **Real-time Updates**: Reflects current stock after sales/returns/restocks
+- **Query Override**: URL parameter `?low_stock_threshold=N` for ad-hoc testing
+
+### RMA Notifications
+- **Notification Service**: New `NotificationService` class managing notification lifecycle
+- **Database Migration**: `0004_add_notifications.sql` creates notifications table with indexes
+- **Disposition-Aware Messages**: Different notifications for REPAIR, REFUND, REPLACEMENT, STORE_CREDIT, REJECT
+- **Status Coverage**: Notifications for SUBMITTED, APPROVED, REJECTED, RECEIVED, INSPECTING, INSPECTED, DISPOSITION, PROCESSING, COMPLETED, CANCELLED
+- **UI Badge**: Real-time unread count in navigation bar
+- **Auto-Polling**: JavaScript polls `/api/notifications/count` every 30 seconds
+- **Notification Center**: Dedicated page at `/notifications` with mark-as-read functionality
+- **Integration**: Automatic notification creation via `RMAManager._log_activity()`
 
 ---
