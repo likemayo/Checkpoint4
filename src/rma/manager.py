@@ -16,6 +16,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple, Any
+from src.notifications import NotificationService
 
 
 class RMAManager:
@@ -897,11 +898,40 @@ class RMAManager:
         notes: str = "",
         metadata: Dict = None
     ):
-        """Log activity to audit trail."""
+        """Log activity to audit trail and create notifications for status changes."""
+        # Log activity
         self.conn.execute("""
             INSERT INTO rma_activity_log (rma_id, action, old_status, new_status, actor, notes, metadata)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (rma_id, action, old_status, new_status, actor, notes, json.dumps(metadata or {})))
+        
+        # Create notification for significant status changes
+        # Get RMA details including disposition for notification
+        rma = self.conn.execute("""
+            SELECT user_id, rma_number, disposition FROM rma_requests WHERE id = ?
+        """, (rma_id,)).fetchone()
+        
+        if rma and new_status and new_status != old_status:
+            # Status transitions that warrant notifications
+            notify_statuses = [
+                'SUBMITTED', 'APPROVED', 'REJECTED', 'RECEIVED', 
+                'INSPECTING', 'INSPECTED', 'DISPOSITION', 'PROCESSING', 'COMPLETED', 'CANCELLED'
+            ]
+            
+            if new_status in notify_statuses:
+                try:
+                    NotificationService.create_rma_status_notification(
+                        conn=self.conn,
+                        user_id=rma["user_id"],
+                        rma_id=rma_id,
+                        rma_number=rma["rma_number"],
+                        old_status=old_status,
+                        new_status=new_status,
+                        disposition=rma["disposition"]
+                    )
+                except Exception as e:
+                    # Don't fail the RMA operation if notification fails
+                    print(f"Warning: Failed to create notification: {e}")
     
     def _notify_customer(self, rma_id: int, notification_type: str, details: str = ""):
         """

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Dict
 
-from flask import Flask, redirect, render_template, request, session, url_for, flash, g 
+from flask import Flask, redirect, render_template, request, session, url_for, flash, g, jsonify 
 import sqlite3
 import time
 import uuid
@@ -32,6 +32,8 @@ except ImportError:
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
     app.secret_key = os.environ.get("APP_SECRET_KEY", "dev-insecure-secret")
+    # Low stock threshold (configurable via environment variable)
+    app.config['LOW_STOCK_THRESHOLD'] = int(os.environ.get('LOW_STOCK_THRESHOLD', '5'))
 
     from .flash_sales.routes import flash_bp
     app.register_blueprint(flash_bp)
@@ -191,24 +193,78 @@ def create_app() -> Flask:
     @app.route("/admin")
     def admin_home():
         """General Admin Homepage linking RMA and Partner admin tools."""
-        # Get user info from session
-        user_id = session.get("user_id")
-        username = session.get("username", "Admin")
+        # Priority: admin_username (partner or database admin when preserving user session)
+        # Fallback: username (database admin or regular user)
+        username = session.get("admin_username") or session.get("username", "Admin")
         
-        # If user is logged in, fetch their current info from database
-        if user_id:
+        # If we have an admin_user_id (database admin preserving user session), fetch that user
+        admin_user_id = session.get("admin_user_id")
+        if admin_user_id:
             conn = get_conn()
             try:
-                user = conn.execute(
+                admin_user = conn.execute(
                     "SELECT username, name FROM user WHERE id = ?",
-                    (user_id,)
+                    (admin_user_id,)
                 ).fetchone()
-                if user:
-                    username = user["username"]
+                if admin_user:
+                    username = admin_user["username"]
             finally:
                 conn.close()
+        # Otherwise if username is from a database user (regular login), fetch current info
+        elif not session.get("admin_username"):
+            user_id = session.get("user_id")
+            if user_id:
+                conn = get_conn()
+                try:
+                    user = conn.execute(
+                        "SELECT username, name FROM user WHERE id = ?",
+                        (user_id,)
+                    ).fetchone()
+                    if user:
+                        username = user["username"]
+                finally:
+                    conn.close()
         
-        return render_template("admin_home.html", username=username)
+        # Low stock alerts (allow optional override via query param for quick inspection)
+        override = request.args.get('low_stock_threshold')
+        threshold = app.config.get('LOW_STOCK_THRESHOLD', 5)
+        if override:
+            try:
+                o_val = int(override)
+                if 0 <= o_val <= 100000:  # basic sanity
+                    threshold = o_val
+            except ValueError:
+                pass
+        conn = get_conn()
+        low_stock_products = []
+        try:
+            repo = AProductRepo(conn)
+            low_stock_products = repo.get_low_stock_products(threshold)
+        except Exception:
+            low_stock_products = []
+        finally:
+            conn.close()
+
+        return render_template(
+            "admin_home.html",
+            username=username,
+            low_stock=low_stock_products,
+            low_stock_threshold=threshold
+        )
+
+    @app.route('/api/low-stock')
+    def api_low_stock():
+        """Return JSON list of low-stock products (admin only)."""
+        if not (session.get('is_admin') or session.get('admin_user_id') or session.get('admin_username')):
+            return jsonify({'error': 'Unauthorized'}), 403
+        conn = get_conn()
+        try:
+            repo = AProductRepo(conn)
+            threshold = app.config.get('LOW_STOCK_THRESHOLD', 5)
+            products = repo.get_low_stock_products(threshold)
+            return jsonify({'threshold': threshold, 'products': products})
+        finally:
+            conn.close()
 
     @app.route("/products")
     def products():
@@ -364,13 +420,33 @@ def create_app() -> Flask:
                             return render_template("login.html")
                         
                         # Set session data
-                        session["user_id"] = user["id"]
-                        session["username"] = user["username"]
+                        # Check if there's already a regular user logged in
+                        existing_user_id = session.get("user_id")
                         
                         if is_admin_user:
-                            session["is_admin"] = True
-                            flash("Admin login successful!", "success")
-                            return redirect(url_for("admin_home"))
+                            # Admin user login - store separately to preserve regular user session
+                            if existing_user_id and existing_user_id != user["id"]:
+                                # Regular user already logged in, add admin without replacing
+                                session["is_admin"] = True
+                                session["admin_username"] = user["username"]
+                                session["admin_user_id"] = user["id"]
+                                # Don't flash message - it will show to the regular user
+                                return redirect(url_for("admin_home"))
+                            else:
+                                # No existing user or same user, normal admin login
+                                session["user_id"] = user["id"]
+                                session["username"] = user["username"]
+                                session["is_admin"] = True
+                                flash("Admin login successful!", "success")
+                                return redirect(url_for("admin_home"))
+                        else:
+                            # Regular user login - only allow if no admin is logged in
+                            if session.get("is_admin"):
+                                flash("An admin is already logged in. Please logout first or use a different browser.", "error")
+                                return render_template("login.html")
+                            
+                            session["user_id"] = user["id"]
+                            session["username"] = user["username"]
                         
                         if OBSERVABILITY_ENABLED:
                             app_logger.info(
@@ -404,24 +480,45 @@ def create_app() -> Flask:
 
     @app.route("/dashboard")
     def dashboard():
-        """User dashboard showing order history and stats."""
+        """User dashboard showing order history and stats with filtering support."""
         if "user_id" not in session:
             flash("Please login to access your dashboard", "error")
             return redirect(url_for("login"))
         
         user_id = session["user_id"]
         
+        # Get filter parameters from query string
+        status_filter = request.args.get('status', '').strip()
+        start_date = request.args.get('start_date', '').strip()
+        end_date = request.args.get('end_date', '').strip()
+        search_query = request.args.get('search', '').strip()
+        
         conn = get_conn()
         try:
-            # Fetch current username from database
+            # Fetch current username from database - always use database, never session
+            # This ensures admin login doesn't affect what username is displayed
             user = conn.execute(
                 "SELECT username, name FROM user WHERE id = ?",
                 (user_id,)
             ).fetchone()
-            username = user["username"] if user else session.get("username", "User")
             
-            # Get all user orders with items
-            orders = conn.execute("""
+            if user:
+                username = user["username"]
+                # Debug logging to diagnose session issue
+                if OBSERVABILITY_ENABLED:
+                    app_logger.info(
+                        "Dashboard loaded",
+                        user_id=user_id,
+                        fetched_username=username,
+                        session_username=session.get("username"),
+                        admin_username=session.get("admin_username"),
+                        is_admin=session.get("is_admin")
+                    )
+            else:
+                username = "User"
+            
+            # Build dynamic SQL query with filters
+            query = """
                 SELECT s.id, s.sale_time as created_at, s.status, 
                        s.total_cents / 100.0 as total,
                        GROUP_CONCAT(p.name || ' (' || si.quantity || 'x)', ', ') as items_summary
@@ -429,9 +526,47 @@ def create_app() -> Flask:
                 LEFT JOIN sale_item si ON s.id = si.sale_id
                 LEFT JOIN product p ON si.product_id = p.id
                 WHERE s.user_id = ?
-                GROUP BY s.id
-                ORDER BY s.sale_time DESC
-            """, (user_id,)).fetchall()
+            """
+            params = [user_id]
+            
+            # Apply status filter (including RMA-related statuses)
+            if status_filter:
+                if status_filter in ['COMPLETED', 'PENDING', 'PROCESSING', 'CANCELLED', 'REFUNDED']:
+                    query += " AND s.status = ?"
+                    params.append(status_filter)
+                elif status_filter == 'RETURNED':
+                    # For RETURNED status, find orders with completed RMAs
+                    query += """ AND s.id IN (
+                        SELECT sale_id FROM rma_requests 
+                        WHERE status = 'COMPLETED' AND disposition IN ('REFUND', 'REPLACEMENT', 'REPAIR', 'STORE_CREDIT')
+                    )"""
+            
+            # Apply date range filter
+            if start_date:
+                query += " AND DATE(s.sale_time) >= ?"
+                params.append(start_date)
+            if end_date:
+                query += " AND DATE(s.sale_time) <= ?"
+                params.append(end_date)
+            
+            # Apply search filter (by order ID or product name)
+            if search_query:
+                query += """ AND (
+                    CAST(s.id AS TEXT) LIKE ? OR
+                    s.id IN (
+                        SELECT DISTINCT si2.sale_id 
+                        FROM sale_item si2
+                        JOIN product p2 ON si2.product_id = p2.id
+                        WHERE p2.name LIKE ?
+                    )
+                )"""
+                search_pattern = f"%{search_query}%"
+                params.extend([search_pattern, search_pattern])
+            
+            query += " GROUP BY s.id ORDER BY s.sale_time DESC"
+            
+            # Get all user orders with items (filtered)
+            orders = conn.execute(query, params).fetchall()
             
             # Get items for each order
             orders_with_items = []
@@ -532,10 +667,15 @@ def create_app() -> Flask:
                     "has_rma": has_rma["count"] > 0
                 })
             
-            # Calculate stats
+            # Calculate stats (based on ALL orders, not just filtered)
+            all_orders = conn.execute("""
+                SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total
+                FROM sale WHERE user_id = ?
+            """, (user_id,)).fetchone()
+            
             stats = {
-                "total_orders": len(orders),
-                "total_spent": sum(o["total"] for o in orders_with_items),
+                "total_orders": all_orders["count"],
+                "total_spent": all_orders["total"] / 100.0,
                 "active_returns": 0,
                 "store_credit": 0.0
             }
@@ -558,14 +698,90 @@ def create_app() -> Flask:
                 stats["store_credit"] = (store_credit_result["total_credit"] or 0) / 100.0
             except:
                 pass  # RMA table might not exist yet
-            
         finally:
             conn.close()
+            
+            return render_template("dashboard.html", 
+                                 username=username, 
+                                 orders=orders_with_items,
+                                 stats=stats,
+                                 filters={
+                                     'status': status_filter,
+                                     'start_date': start_date,
+                                     'end_date': end_date,
+                                     'search': search_query
+                                 })
+
+    @app.route("/notifications")
+    def notifications():
+        """View user notifications"""
+        if "user_id" not in session:
+            flash("Please login to view notifications", "error")
+            return redirect(url_for("login"))
         
-        return render_template("dashboard.html", 
-                             username=username, 
-                             orders=orders_with_items,
-                             stats=stats)
+        user_id = session["user_id"]
+        
+        from src.notifications import NotificationService
+        conn = get_conn()
+        try:
+            # Get all notifications
+            all_notifications = NotificationService.get_user_notifications(conn, user_id, unread_only=False, limit=100)
+            unread_count = NotificationService.get_unread_count(conn, user_id)
+            
+            return render_template("notifications.html",
+                                 notifications=all_notifications,
+                                 unread_count=unread_count)
+        finally:
+            conn.close()
+    
+    @app.route("/notifications/mark-read/<int:notification_id>", methods=["POST"])
+    def mark_notification_read(notification_id: int):
+        """Mark a notification as read"""
+        if "user_id" not in session:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        user_id = session["user_id"]
+        
+        from src.notifications import NotificationService
+        conn = get_conn()
+        try:
+            success = NotificationService.mark_as_read(conn, notification_id, user_id)
+            unread_count = NotificationService.get_unread_count(conn, user_id)
+            return jsonify({"success": success, "unread_count": unread_count})
+        finally:
+            conn.close()
+    
+    @app.route("/notifications/mark-all-read", methods=["POST"])
+    def mark_all_notifications_read():
+        """Mark all notifications as read"""
+        if "user_id" not in session:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        user_id = session["user_id"]
+        
+        from src.notifications import NotificationService
+        conn = get_conn()
+        try:
+            count = NotificationService.mark_all_as_read(conn, user_id)
+            return jsonify({"success": True, "count": count, "unread_count": 0})
+        finally:
+            conn.close()
+    
+    @app.route("/api/notifications/count")
+    def get_notification_count():
+        """API endpoint to get unread notification count (for badge)"""
+        if "user_id" not in session:
+            return jsonify({"count": 0})
+        
+        user_id = session["user_id"]
+        
+        from src.notifications import NotificationService
+        conn = get_conn()
+        try:
+            count = NotificationService.get_unread_count(conn, user_id)
+            return jsonify({"count": count})
+        finally:
+            conn.close()
 
     @app.route("/register", methods=["GET", "POST"])
     def register():
@@ -948,8 +1164,10 @@ def create_app() -> Flask:
         return redirect(url_for("admin_flash_sale"))
 
     return app
-    
+
+
+# Create app instance at module level for Flask CLI and WSGI servers
+app = create_app()
 
 if __name__ == "__main__":
-    app = create_app()
     app.run(debug=True, host="127.0.0.1", port=int(os.environ.get("PORT", "5000")))

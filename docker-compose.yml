@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: checkpoint3-web
+    container_name: checkpoint4-web
     ports:
       - "5000:5000"
     environment:
@@ -13,6 +13,7 @@ services:
       - FLASK_ENV=development
       - PORT=5000
       - SEED_DATA=true
+      - LOW_STOCK_THRESHOLD=${LOW_STOCK_THRESHOLD:-5}
     volumes:
       # Mount database directory for persistence
       - db-data:/app/data
@@ -37,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: checkpoint3-worker
+    container_name: checkpoint4-worker
     environment:
       - APP_DB_PATH=/app/data/app.sqlite
     volumes:

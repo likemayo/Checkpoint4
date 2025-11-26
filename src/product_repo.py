@@ -108,3 +108,21 @@ class AProductRepo(ProductRepo):
             products.append(product)
         
         return products
+
+    def get_low_stock_products(self, threshold: int):
+        """Return active products at or below the given stock threshold.
+
+        Args:
+            threshold: Stock quantity at or below which to alert.
+        Returns:
+            List[Dict] of {id, name, stock}
+        """
+        cursor = self.conn.execute(
+            """SELECT id, name, stock
+                   FROM product
+                   WHERE active = 1 AND stock <= ?
+                   ORDER BY stock ASC, name""",
+            (threshold,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]

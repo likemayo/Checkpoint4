@@ -235,7 +235,11 @@ def partner_admin_login():
         key = request.form.get('admin_key')
 
     if key and key == expected:
+        # Store admin authentication separately from user authentication
+        # This allows both user and admin to be logged in simultaneously
         session['is_admin'] = True
+        session['admin_username'] = 'admin1'
+        
         # if form-based, redirect back to admin UI
         if not (request.content_type and request.content_type.startswith('application/json')):
             return redirect(url_for('.partner_admin'))
@@ -252,7 +256,10 @@ def partner_admin_login_get():
 
 @bp.post('/admin/logout')
 def partner_admin_logout():
+    # Only clear admin-specific session data, preserve user login
     session.pop('is_admin', None)
+    session.pop('admin_username', None)
+    return ('OK', 200)
     return ('OK', 200)
 
 

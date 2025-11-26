@@ -46,6 +46,16 @@
         .tab:hover { color: #2c3e50; }
         .tab.active { color: #3498db; border-bottom: 2px solid #3498db; margin-bottom: -2px; font-weight: 600; }
         
+        /* Filter Section */
+        .filters-section { background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
+        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; align-items: end; }
+        .filter-item { display: flex; flex-direction: column; }
+        .filter-item label { font-size: 0.85rem; font-weight: 600; color: #2c3e50; margin-bottom: 0.5rem; text-transform: uppercase; }
+        .filter-item input, .filter-item select { padding: 0.6rem; border: 1px solid #dfe6e9; border-radius: 4px; font-size: 0.9rem; background: white; }
+        .filter-item input:focus, .filter-item select:focus { outline: none; border-color: #3498db; box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1); }
+        .filter-actions { display: flex; gap: 0.5rem; }
+        .filter-actions .btn { width: 100%; }
+        
         /* Orders Table */
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #ecf0f1; }
@@ -106,6 +116,19 @@
         }
         .credit-banner h3 { margin: 0; font-size: 1.2rem; }
         .credit-banner .amount { font-size: 2rem; font-weight: bold; }
+        
+        /* Notification Badge */
+        .nav-badge { 
+            background: #e74c3c; 
+            color: white; 
+            padding: 0.2rem 0.5rem; 
+            border-radius: 10px; 
+            font-size: 0.75rem; 
+            font-weight: bold; 
+            margin-left: 0.3rem;
+            display: none;
+        }
+        .nav-badge.show { display: inline-block; }
     </style>
 </head>
 <body>
@@ -116,6 +139,10 @@
             <div class="nav-links">
                 <a href="/products">Browse Products</a>
                 <a href="/rma/my-returns">My Returns</a>
+                <a href="/notifications">
+                    Notifications
+                    <span class="nav-badge" id="notificationBadge"></span>
+                </a>
                 <a href="/logout">Logout</a>
             </div>
         </div>
@@ -176,6 +203,60 @@
                 My Orders
                 <a href="/products" class="btn btn-primary btn-small">+ New Order</a>
             </h2>
+            
+            <!-- Filter Section -->
+            <div class="filters-section">
+                <form id="filterForm" method="GET" action="/dashboard">
+                    <div class="filter-grid">
+                        <!-- Search Input -->
+                        <div class="filter-item">
+                            <label for="search">Search</label>
+                            <input type="text" 
+                                   id="search" 
+                                   name="search" 
+                                   placeholder="Order ID or Product Name" 
+                                   value="{{ filters.search if filters else '' }}">
+                        </div>
+                        
+                        <!-- Status Filter -->
+                        <div class="filter-item">
+                            <label for="status">Status</label>
+                            <select id="status" name="status">
+                                <option value="">All Statuses</option>
+                                <option value="COMPLETED" {% if filters and filters.status == 'COMPLETED' %}selected{% endif %}>Completed</option>
+                                <option value="PENDING" {% if filters and filters.status == 'PENDING' %}selected{% endif %}>Pending</option>
+                                <option value="PROCESSING" {% if filters and filters.status == 'PROCESSING' %}selected{% endif %}>Processing</option>
+                                <option value="RETURNED" {% if filters and filters.status == 'RETURNED' %}selected{% endif %}>Returned</option>
+                                <option value="REFUNDED" {% if filters and filters.status == 'REFUNDED' %}selected{% endif %}>Refunded</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Start Date -->
+                        <div class="filter-item">
+                            <label for="start_date">From Date</label>
+                            <input type="date" 
+                                   id="start_date" 
+                                   name="start_date" 
+                                   value="{{ filters.start_date if filters else '' }}">
+                        </div>
+                        
+                        <!-- End Date -->
+                        <div class="filter-item">
+                            <label for="end_date">To Date</label>
+                            <input type="date" 
+                                   id="end_date" 
+                                   name="end_date" 
+                                   value="{{ filters.end_date if filters else '' }}">
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="filter-actions">
+                            <button type="submit" class="btn btn-primary btn-small">Apply Filters</button>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="clearFilters()">Clear</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
             
             <!-- Tabs -->
             <div class="tabs">
@@ -268,6 +349,43 @@
                 }
             });
         }
+        
+        function clearFilters() {
+            // Clear all form inputs
+            document.getElementById('search').value = '';
+            document.getElementById('status').value = '';
+            document.getElementById('start_date').value = '';
+            document.getElementById('end_date').value = '';
+            
+            // Reload page without query parameters
+            window.location.href = '/dashboard';
+        }
+    </script>
+    
+    <script>
+        // Fetch and update notification count
+        async function updateNotificationBadge() {
+            try {
+                const response = await fetch('/api/notifications/count');
+                const data = await response.json();
+                const badge = document.getElementById('notificationBadge');
+                
+                if (data.count > 0) {
+                    badge.textContent = data.count;
+                    badge.classList.add('show');
+                } else {
+                    badge.classList.remove('show');
+                }
+            } catch (error) {
+                console.error('Error fetching notification count:', error);
+            }
+        }
+        
+        // Update badge on page load
+        updateNotificationBadge();
+        
+        // Poll for new notifications every 30 seconds
+        setInterval(updateNotificationBadge, 30000);
     </script>
 </body>
 </html>

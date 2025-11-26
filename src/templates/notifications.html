@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+    <title>Notifications</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
+        
+        /* Navigation */
+        nav { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        nav .container { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        nav h1 { font-size: 1.5rem; }
+        nav .nav-links a { color: white; text-decoration: none; margin-left: 1.5rem; padding: 0.5rem 1rem; border-radius: 4px; transition: background 0.3s; }
+        nav .nav-links a:hover { background: #34495e; }
+        
+        /* Main Container */
+        .main-container { max-width: 900px; margin: 2rem auto; padding: 0 2rem; }
+        
+        /* Header */
+        .header { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { color: #2c3e50; }
+        .mark-all-btn { background: #3498db; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.3s; }
+        .mark-all-btn:hover { background: #2980b9; }
+        .mark-all-btn:disabled { background: #95a5a6; cursor: not-allowed; }
+        
+        /* Notification List */
+        .notification-list { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .notification-item { padding: 1.5rem; border-bottom: 1px solid #ecf0f1; display: flex; gap: 1rem; transition: background 0.2s; }
+        .notification-item:last-child { border-bottom: none; }
+        .notification-item.unread { background: #e3f2fd; border-left: 4px solid #3498db; }
+        .notification-item:hover { background: #f8f9fa; }
+        
+        .notification-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+        .notification-icon.rma { background: #e8f5e9; color: #27ae60; }
+        .notification-icon.refund { background: #fff3e0; color: #f39c12; }
+        
+        .notification-content { flex: 1; }
+        .notification-title { font-weight: 600; color: #2c3e50; margin-bottom: 0.25rem; }
+        .notification-message { color: #7f8c8d; font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .notification-meta { display: flex; gap: 1rem; font-size: 0.85rem; color: #95a5a6; }
+        .notification-time { }
+        .notification-rma { color: #3498db; font-weight: 500; }
+        
+        .notification-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+        .mark-read-btn { background: #3498db; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+        .mark-read-btn:hover { background: #2980b9; }
+        .mark-read-btn:disabled { background: #95a5a6; cursor: not-allowed; }
+        
+        .empty-state { text-align: center; padding: 4rem 2rem; color: #7f8c8d; }
+        .empty-state .icon { font-size: 4rem; margin-bottom: 1rem; }
+        .empty-state h3 { color: #2c3e50; margin-bottom: 0.5rem; }
+        
+        .unread-badge { background: #e74c3c; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.85rem; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <div class="container">
+            <h1>🔔 Notifications</h1>
+            <div class="nav-links">
+                <a href="/dashboard">Dashboard</a>
+                <a href="/products">Products</a>
+                <a href="/rma/my-returns">My Returns</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h2>Your Notifications</h2>
+                {% if unread_count > 0 %}
+                <p style="color: #7f8c8d; margin-top: 0.5rem;">
+                    <span class="unread-badge">{{ unread_count }} unread</span>
+                </p>
+                {% endif %}
+            </div>
+            {% if unread_count > 0 %}
+            <button class="mark-all-btn" onclick="markAllRead()">Mark All as Read</button>
+            {% endif %}
+        </div>
+        
+        <!-- Notification List -->
+        {% if notifications %}
+        <div class="notification-list">
+            {% for notification in notifications %}
+            <div class="notification-item {% if not notification.is_read %}unread{% endif %}" id="notification-{{ notification.id }}">
+                <div class="notification-icon {{ notification.type.lower().replace('_', '-') }}">
+                    {% if notification.type == 'RMA_STATUS' %}📦{% else %}💰{% endif %}
+                </div>
+                
+                <div class="notification-content">
+                    <div class="notification-title">{{ notification.title }}</div>
+                    <div class="notification-message">{{ notification.message }}</div>
+                    <div class="notification-meta">
+                        <span class="notification-time">{{ notification.created_at }}</span>
+                        {% if notification.rma_number %}
+                        <span class="notification-rma">{{ notification.rma_number }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                {% if not notification.is_read %}
+                <div class="notification-actions">
+                    <button class="mark-read-btn" onclick="markAsRead({{ notification.id }})">Mark as Read</button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">🔕</div>
+            <h3>No Notifications</h3>
+            <p>You're all caught up! We'll notify you about important updates.</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <script>
+        async function markAsRead(notificationId) {
+            try {
+                const response = await fetch(`/notifications/mark-read/${notificationId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    const notificationElement = document.getElementById(`notification-${notificationId}`);
+                    notificationElement.classList.remove('unread');
+                    notificationElement.querySelector('.notification-actions')?.remove();
+                    
+                    // Update badge if it exists
+                    updateBadge(data.unread_count);
+                    
+                    // Reload if no more unread
+                    if (data.unread_count === 0) {
+                        setTimeout(() => location.reload(), 500);
+                    }
+                }
+            } catch (error) {
+                console.error('Error marking notification as read:', error);
+            }
+        }
+        
+        async function markAllRead() {
+            try {
+                const response = await fetch('/notifications/mark-all-read', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (error) {
+                console.error('Error marking all as read:', error);
+            }
+        }
+        
+        function updateBadge(count) {
+            // Update badge in navigation if present
+            const badge = document.querySelector('.nav-badge');
+            if (badge) {
+                if (count > 0) {
+                    badge.textContent = count;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

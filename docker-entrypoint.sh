@@ -45,4 +45,4 @@ fi
 
 # Start the Flask application
 echo "Starting Flask application on port ${PORT:-5000}..."
-exec python -m flask --app src.app:create_app run --host=0.0.0.0 --port="${PORT:-5000}"
+exec python -m flask --app src.app:app run --host=0.0.0.0 --port="${PORT:-5000}"
