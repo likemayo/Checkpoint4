@@ -17,6 +17,7 @@ from .payment import process as payment_process
 from .main import init_db
 from .adapters.registry import get_adapter
 from .partners.partner_ingest_service import validate_products, upsert_products
+from .session_interface import DatabaseSessionInterface
 
 # Import observability components
 try:
@@ -34,6 +35,11 @@ def create_app() -> Flask:
     app.secret_key = os.environ.get("APP_SECRET_KEY", "dev-insecure-secret")
     # Low stock threshold (configurable via environment variable)
     app.config['LOW_STOCK_THRESHOLD'] = int(os.environ.get('LOW_STOCK_THRESHOLD', '5'))
+
+    # Setup database-backed session interface for independent multi-tab sessions
+    root = Path(__file__).resolve().parents[1]
+    db_path = os.environ.get("APP_DB_PATH", str(root / "app.sqlite"))
+    app.session_interface = DatabaseSessionInterface(db_path)
 
     from .flash_sales.routes import flash_bp
     app.register_blueprint(flash_bp)

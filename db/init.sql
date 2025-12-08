@@ -156,3 +156,17 @@ CREATE INDEX IF NOT EXISTS idx_sale_user_id ON sale(user_id);
 CREATE INDEX IF NOT EXISTS idx_sale_item_sale_id ON sale_item(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sale_item_product_id ON sale_item(product_id);
 CREATE INDEX IF NOT EXISTS idx_payment_sale_id ON payment(sale_id);
+
+-- =============================
+-- Session storage for multiple independent browser sessions
+-- Allows users to login as different roles/users on separate tabs
+-- =============================
+CREATE TABLE IF NOT EXISTS flask_sessions (
+    id TEXT PRIMARY KEY,
+    data BLOB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_flask_sessions_expires_at ON flask_sessions(expires_at);

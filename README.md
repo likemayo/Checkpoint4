@@ -428,8 +428,4 @@ docs/
 - Pragya Chapagain
 - Yanlin Wu
 
----
 
-## 📝 License
-
-Educational project for software engineering course.

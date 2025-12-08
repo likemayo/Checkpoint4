@@ -8,6 +8,7 @@ from .payment_resilience import process_payment_resilient
 import os
 from pathlib import Path
 from typing import Dict
+from functools import wraps
 
 # Create blueprint
 flash_bp = Blueprint(
@@ -26,7 +27,33 @@ def get_conn():
     return get_connection(db_path)
 
 
+def admin_required(f):
+    """Decorator to restrict flash sales access to admin users only"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please login to access flash sales', 'error')
+            return redirect(url_for('login'))
+        
+        # Check if user is admin
+        conn = get_conn()
+        try:
+            user = conn.execute(
+                'SELECT role FROM user WHERE id = ?',
+                (session['user_id'],)
+            ).fetchone()
+            if not user or user['role'] != 'admin':
+                flash('Only admin users can access flash sales', 'error')
+                return redirect(url_for('admin'))
+        finally:
+            conn.close()
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 @flash_bp.route('/products')
+@admin_required
 def flash_products():
     """Show all active flash sale products"""
     # Try to get from cache first
@@ -47,6 +74,7 @@ def flash_products():
 
 
 @flash_bp.post('/cart/add')
+@admin_required
 @rate_limit(max_requests=10, window_seconds=60)
 def flash_cart_add():
     """Add flash sale product to cart with rate limiting"""
@@ -88,6 +116,7 @@ def flash_cart_add():
 
 
 @flash_bp.get('/cart')
+@admin_required
 def flash_cart_view():
     """View flash sale cart with discounted prices"""
     flash_cart: Dict[str, int] = session.get("flash_cart", {})
@@ -137,6 +166,7 @@ def flash_cart_view():
 
 
 @flash_bp.post('/cart/clear')
+@admin_required
 def flash_cart_clear():
     """Clear flash sale cart"""
     session.pop("flash_cart", None)
@@ -145,6 +175,7 @@ def flash_cart_clear():
 
 
 @flash_bp.post('/checkout')
+@admin_required
 @rate_limit(max_requests=5, window_seconds=60)
 def flash_checkout():
     """

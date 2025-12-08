@@ -236,9 +236,8 @@
         <h1>⚡ Flash Cart <span class="flash-badge">SPECIAL PRICES</span></h1>
         
         <nav>
-            <a href="{{ url_for('flash_sales.flash_products') }}">← Back to Flash Sales</a>
-            <a href="{{ url_for('products') }}">Regular Products</a>
-            <a href="{{ url_for('cart_view') }}">Regular Cart</a>
+            <a href="{{ url_for('flash_sales.flash_products') }}">⚡ Flash Sales</a>
+            <a href="{{ url_for('admin') }}">📊 Admin Dashboard</a>
         </nav>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
