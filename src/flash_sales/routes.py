@@ -31,20 +31,25 @@ def admin_required(f):
     """Decorator to restrict flash sales access to admin users only"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Allow access if admin is logged in
+        if session.get('is_admin') or session.get('admin_user_id') or session.get('admin_username'):
+            return f(*args, **kwargs)
+        
+        # Otherwise check if regular user is an admin user
         if 'user_id' not in session:
             flash('Please login to access flash sales', 'error')
             return redirect(url_for('login'))
         
-        # Check if user is admin
+        # Check if user is admin (name starts with "Admin: ")
         conn = get_conn()
         try:
             user = conn.execute(
-                'SELECT role FROM user WHERE id = ?',
+                'SELECT name FROM user WHERE id = ?',
                 (session['user_id'],)
             ).fetchone()
-            if not user or user['role'] != 'admin':
+            if not user or not (user['name'] and user['name'].startswith('Admin: ')):
                 flash('Only admin users can access flash sales', 'error')
-                return redirect(url_for('admin'))
+                return redirect(url_for('products'))
         finally:
             conn.close()
         

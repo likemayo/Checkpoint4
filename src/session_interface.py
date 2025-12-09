@@ -57,13 +57,16 @@ class DatabaseSessionInterface(SessionInterface):
                 try:
                     data = pickle.loads(row['data'])
                     return DatabaseSession(initial=data, sid=sid, permanent=True)
-                except Exception:
+                except Exception as e:
                     # Corrupted session data
+                    app.logger.error(f"Failed to deserialize session data: {e}")
                     return DatabaseSession(sid=None, permanent=False)
-        except Exception:
-            pass
-
-        return DatabaseSession(sid=None, permanent=False)
+            else:
+                # Session expired or not found
+                return DatabaseSession(sid=None, permanent=False)
+        except Exception as e:
+            app.logger.error(f"Failed to load session: {e}")
+            return DatabaseSession(sid=None, permanent=False)
 
     def save_session(self, app, session, response):
         """Save session to database."""
@@ -78,8 +81,8 @@ class DatabaseSessionInterface(SessionInterface):
                     conn.execute("DELETE FROM flask_sessions WHERE id = ?", (session.sid,))
                     conn.commit()
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    app.logger.error(f"Failed to delete session: {e}")
             
             if session.sid:
                 response.delete_cookie(
@@ -87,6 +90,10 @@ class DatabaseSessionInterface(SessionInterface):
                     domain=domain,
                     path=path
                 )
+            return
+
+        # Only save if session has been modified or if there's no SID yet
+        if not session.modified and session.sid:
             return
 
         # Generate session ID if needed

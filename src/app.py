@@ -199,6 +199,11 @@ def create_app() -> Flask:
     @app.route("/admin")
     def admin_home():
         """General Admin Homepage linking RMA and Partner admin tools."""
+        # Require admin authentication
+        if not (session.get('is_admin') or session.get('admin_user_id') or session.get('admin_username')):
+            flash("Please login as admin to access this page", "error")
+            return redirect(url_for("login"))
+        
         # Priority: admin_username (partner or database admin when preserving user session)
         # Fallback: username (database admin or regular user)
         username = session.get("admin_username") or session.get("username", "Admin")
@@ -1120,8 +1125,24 @@ def create_app() -> Flask:
     @app.post("/admin/flash-sale/set")
     def admin_flash_sale_set():
         """Set a product as flash sale"""
-        product_id = int(request.form.get("product_id"))
-        flash_price = float(request.form.get("flash_price"))
+        product_id = request.form.get("product_id")
+        flash_price = request.form.get("flash_price")
+        
+        # Validate inputs
+        if not product_id or not flash_price:
+            flash("Please provide both product ID and flash price", "error")
+            return redirect(url_for("admin_flash_sale"))
+        
+        try:
+            product_id = int(product_id)
+            flash_price = float(flash_price)
+            if flash_price <= 0:
+                flash("Flash price must be greater than 0", "error")
+                return redirect(url_for("admin_flash_sale"))
+        except (ValueError, TypeError):
+            flash("Invalid product ID or flash price", "error")
+            return redirect(url_for("admin_flash_sale"))
+        
         flash_price_cents = int(flash_price * 100)
         
         conn = get_conn()
