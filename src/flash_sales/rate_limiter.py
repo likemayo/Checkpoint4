@@ -56,9 +56,16 @@ def rate_limit(max_requests: int = 10, window_seconds: int = 60):
             identifier = request.remote_addr
             
             if not limiter.is_allowed(identifier):
-                return jsonify({
-                    "error": "Rate limit exceeded. Please try again later."
-                }), 429
+                # Check if this is an API request or web request
+                if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+                    return jsonify({
+                        "error": "Rate limit exceeded. Please try again later."
+                    }), 429
+                else:
+                    # For web requests, use flash message and redirect
+                    from flask import flash, redirect, url_for
+                    flash(f"Rate limit exceeded. You can only make {max_requests} requests per {window_seconds} seconds. Please try again later.", "error")
+                    return redirect(url_for('flash_sales.flash_products'))
             
             return f(*args, **kwargs)
         return wrapped

@@ -79,8 +79,8 @@ def flash_products():
 
 
 @flash_bp.post('/cart/add')
+@rate_limit(max_requests=3, window_seconds=60)
 @admin_required
-@rate_limit(max_requests=10, window_seconds=60)
 def flash_cart_add():
     """Add flash sale product to cart with rate limiting"""
     pid = int(request.form.get("product_id", 0))
@@ -180,8 +180,8 @@ def flash_cart_clear():
 
 
 @flash_bp.post('/checkout')
+@rate_limit(max_requests=3, window_seconds=60)
 @admin_required
-@rate_limit(max_requests=5, window_seconds=60)
 def flash_checkout():
     """
     Checkout flash sale cart with rate limiting, circuit breaker, and retry
